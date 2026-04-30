@@ -22,11 +22,10 @@ from src.storage import get_db
 from data_provider import DataFetcherManager
 from data_provider.realtime_types import ChipDistribution
 from src.analyzer import GeminiAnalyzer, AnalysisResult, STOCK_NAME_MAP
-from src.notification import NotificationService, NotificationChannel
+from src.notification import NotificationService, NotificationChannel, BotMessage
 from src.search_service import SearchService
 from src.enums import ReportType
 from src.stock_analyzer import StockTrendAnalyzer, TrendAnalysisResult
-from bot.models import BotMessage
 
 
 logger = logging.getLogger(__name__)
