@@ -1,0 +1,71 @@
+name: Build TUI Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install build deps
+        run: pip install pyinstaller textual
+
+      - name: Build executable (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: pyinstaller --onefile --console --name open-daily-stock --additional-hooks-dir .github/pyinstaller-hooks main.py
+        env:
+          GITHUB_ACTIONS: true
+
+      - name: Build executable (macOS)
+        if: matrix.os == 'macos-latest'
+        run: pyinstaller --onefile --console --name open-daily-stock-macos --additional-hooks-dir .github/pyinstaller-hooks main.py
+        env:
+          GITHUB_ACTIONS: true
+
+      - name: Build executable (Windows)
+        if: matrix.os == 'windows-latest'
+        run: pyinstaller --onefile --console --name open-daily-stock.exe --additional-hooks-dir .github/pyinstaller-hooks main.py
+        env:
+          GITHUB_ACTIONS: true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-daily-stock-${{ matrix.os }}
+          path: dist/open-daily-stock*
+          retention-days: 30
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
