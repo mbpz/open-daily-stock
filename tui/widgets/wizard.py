@@ -89,6 +89,10 @@ class WizardView(Static):
             self._refresh_display()
 
         elif event.key == "enter":
+            # 检查是否有输入框活跃
+            if self.query("Input"):
+                return
+
             field = step["fields"][self._selected_field_idx]
             self._edit_field(field)
 
