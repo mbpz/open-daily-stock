@@ -56,7 +56,23 @@ class TUIApp(App):
         self._task_store = TaskStore()
         self._poll_timer: Timer | None = None
 
+        # 检测是否需要首次启动引导
+        self._show_wizard = config.is_first_time_setup()
+        self._wizard_completed = False
+
     def compose(self):
+        if self._show_wizard and not self._wizard_completed:
+            from tui.widgets.wizard import WizardView
+            def on_wizard_complete():
+                self._wizard_completed = True
+                self._refresh_main_view()
+            def on_wizard_skip():
+                self._wizard_completed = True
+                self.action_switch(0)  # 进入 Markets
+            yield WizardView(on_complete_callback=on_wizard_complete, on_skip_callback=on_wizard_skip)
+            return
+
+        # 正常视图
         yield Header()
         yield Nav(active=0)
         yield Footer(last_update="---")
@@ -67,6 +83,15 @@ class TUIApp(App):
         yield LogsView()
 
     def on_mount(self):
+        self._start_polling()
+
+    def _refresh_main_view(self):
+        """刷新主视图（在引导完成后调用）"""
+        self._wizard_completed = True
+        for widget in list(self.children):
+            widget.remove()
+        for w in self.compose():
+            self.mount(w)
         self._start_polling()
 
     def _start_polling(self):
