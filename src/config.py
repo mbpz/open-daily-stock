@@ -459,6 +459,24 @@ class Config:
         if 'FEISHU_WEBHOOK_URL' in updates:
             self.feishu_webhook_url = updates['FEISHU_WEBHOOK_URL']
 
+    def is_first_time_setup(self) -> bool:
+        """
+        检查是否需要显示首次启动引导
+
+        满足以下任一条件返回 True：
+        - .env 文件不存在
+        - AI API Key 未配置
+        - 自选股列表为空
+        """
+        env_path = Path(__file__).parent / '.env'
+        if not env_path.exists():
+            return True
+        if not self.openai_api_key and not self.gemini_api_key:
+            return True
+        if not self.stock_list:
+            return True
+        return False
+
     def validate(self) -> List[str]:
         """
         验证配置完整性
