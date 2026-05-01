@@ -105,15 +105,15 @@ class TestConfigView:
                 nav_hint = app.query_one("#nav-hint", Static)
                 assert "配置管理" in str(nav_hint.render())
 
-                # Verify all 7 fields are present
-                for i in range(7):
+                # Verify each field has its correct label
+                expected_labels = [
+                    "自选股列表", "OpenAI API Key", "API 地址", "模型名称",
+                    "Gemini API Key", "企业微信 Webhook", "飞书 Webhook"
+                ]
+                for i, expected_label in enumerate(expected_labels):
                     field = app.query_one(f"#field-{i}", Static)
                     field_text = str(field.render())
-                    # Check label is shown
-                    assert any(label in field_text for label in [
-                        "自选股列表", "OpenAI API Key", "API 地址", "模型名称",
-                        "Gemini API Key", "企业微信 Webhook", "飞书 Webhook"
-                    ]), f"Field {i} missing expected label. Got: {field_text}"
+                    assert expected_label in field_text, f"Field {i} missing '{expected_label}'. Got: {field_text}"
 
     async def test_config_edit_and_save(self, mock_config):
         """test_config_edit_and_save - 编辑并保存配置"""
@@ -287,6 +287,8 @@ class TestLogsView:
             assert "日志" in rendered
             # Verify log content is loaded (or "暂无日志" if file not found in test env)
             assert "过滤:" in rendered
+            # Check that the log content was actually loaded
+            assert "Starting analysis" in rendered or "暂无日志" not in rendered
 
     async def test_logs_view_empty(self):
         """test_logs_view_empty - LogsView 无日志文件时显示空状态"""
