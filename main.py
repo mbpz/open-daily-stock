@@ -22,30 +22,13 @@ A股自选股智能分析系统 - 主调度程序
 - 买点偏好：缩量回踩 MA5/MA10 支撑
 """
 import os
-
-# 代理配置 - 仅在本地环境使用，GitHub Actions 不需要
-if os.getenv("GITHUB_ACTIONS") != "true":
-    # 本地开发环境，如需代理请取消注释或修改端口
-    os.environ["http_proxy"] = "http://127.0.0.1:10809"
-    os.environ["https_proxy"] = "http://127.0.0.1:10809"
-    pass
-
-import argparse
-import logging
 import sys
+import logging
 import time
 from datetime import datetime, timezone, timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import List, Optional
-from src.feishu_doc import FeishuDocManager
-
-from src.config import get_config, Config
-from src.notification import NotificationService
-from src.core.pipeline import StockAnalysisPipeline
-from src.core.market_review import run_market_review
-from src.search_service import SearchService
-from src.analyzer import GeminiAnalyzer
 
 # 配置日志格式
 LOG_FORMAT = '%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s'
@@ -325,8 +308,22 @@ def main() -> int:
     """
     # 解析命令行参数
     args = parse_arguments()
-    
-    # 加载配置（在设置日志前加载，以获取日志目录）
+
+    # === TUI 模式：直接启动 TUI，不加载其他模块 ===
+    if args.tui:
+        # 延迟导入，只在 TUI 模式下加载
+        from tui.main import main as tui_main
+        return tui_main()
+
+    # === 非 TUI 模式：加载所有模块 ===
+    from src.feishu_doc import FeishuDocManager
+    from src.config import get_config, Config
+    from src.notification import NotificationService
+    from src.core.pipeline import StockAnalysisPipeline
+    from src.core.market_review import run_market_review
+    from src.search_service import SearchService
+    from src.analyzer import GeminiAnalyzer
+
     config = get_config()
     
     # 配置日志（输出到控制台和文件）
@@ -359,10 +356,6 @@ def main() -> int:
             start_bot_stream_clients(config)
         except Exception as e:
             logger.error(f"启动 WebUI 失败: {e}")
-
-    if args.tui:
-        from tui.main import main as tui_main
-        return tui_main()
 
     # === 仅 WebUI 模式：不自动执行分析 ===
     if args.webui_only:
