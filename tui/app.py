@@ -85,6 +85,8 @@ class TUIApp(App):
         yield LogsView()
 
     def on_mount(self):
+        if self._show_wizard and not self._wizard_completed:
+            return  # Don't start polling during wizard
         self._start_polling()
 
     def _refresh_main_view(self):
@@ -99,12 +101,17 @@ class TUIApp(App):
     def _start_polling(self):
         """Start auto-poll timer."""
         async def poll():
-            await self._dp.fetch_all()
-            markets = self.query(MarketsView).first()
-            markets.refresh()
-            footer = self.query(Footer).first()
-            footer.set_last_update(self._dp.get_last_update() or "---")
+            try:
+                await self._dp.fetch_all()
+                markets = self.query(MarketsView).first()
+                markets.refresh()
+                footer = self.query(Footer).first()
+                footer.set_last_update(self._dp.get_last_update() or "---")
+            except Exception:
+                pass  # Ignore poll errors during view transitions
 
+        if self._poll_timer:
+            self._poll_timer.stop()
         self._poll_timer = self.set_interval(self._dp.poll_interval, poll)
 
     def action_switch(self, idx: int):
@@ -121,9 +128,12 @@ class TUIApp(App):
         if self._refresh_task and not self._refresh_task.done():
             self._refresh_task.cancel()
         async def refresh():
-            await self._dp.fetch_all()
-            markets = self.query(MarketsView).first()
-            markets.refresh()
-            footer = self.query(Footer).first()
-            footer.set_last_update(self._dp.get_last_update() or "---")
+            try:
+                await self._dp.fetch_all()
+                markets = self.query(MarketsView).first()
+                markets.refresh()
+                footer = self.query(Footer).first()
+                footer.set_last_update(self._dp.get_last_update() or "---")
+            except Exception:
+                pass
         self._refresh_task = asyncio.create_task(refresh())
