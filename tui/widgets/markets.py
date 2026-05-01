@@ -8,7 +8,16 @@ class MarketsView(Static):
         super().__init__()
         self._dp = data_provider
 
-    def render(self) -> str:
+    def compose(self):
+        # 跳过引导后的提示条
+        app = self.app
+        if getattr(app, '_wizard_skipped', False):
+            yield Static("⚠️ 请先配置（按 4 进入 Config）", id="wizard-warning")
+        yield Static("实时行情", id="markets-title")
+        # 数据显示
+        yield Static(self._render_data(), id="markets-data")
+
+    def _render_data(self) -> str:
         data = self._dp.get_data()
         lines = ["  代码        名称        最新价      涨跌        成交量  "]
         lines.append("  " + "-" * 60)

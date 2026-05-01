@@ -59,6 +59,7 @@ class TUIApp(App):
         # 检测是否需要首次启动引导
         self._show_wizard = config.is_first_time_setup()
         self._wizard_completed = False
+        self._wizard_skipped = False
 
     def compose(self):
         if self._show_wizard and not self._wizard_completed:
@@ -68,6 +69,7 @@ class TUIApp(App):
                 self._refresh_main_view()
             def on_wizard_skip():
                 self._wizard_completed = True
+                self._wizard_skipped = True  # 标记用户跳过了引导
                 self.action_switch(0)  # 进入 Markets
             yield WizardView(on_complete_callback=on_wizard_complete, on_skip_callback=on_wizard_skip)
             return
