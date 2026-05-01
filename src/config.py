@@ -400,11 +400,65 @@ class Config:
             if code.strip()
         ]
 
-        if not stock_list:        
+        if not stock_list:
             stock_list = ['000001']
 
         self.stock_list = stock_list
-    
+
+    def save_to_env(self, updates: dict) -> bool:
+        """
+        将配置更新写入 .env 文件
+
+        Args:
+            updates: dict of key-value pairs to save
+
+        Returns:
+            是否保存成功
+        """
+        env_path = Path(__file__).parent / '.env'
+
+        # 读取现有配置
+        existing = {}
+        if env_path.exists():
+            existing = dotenv_values(env_path)
+
+        # 合并更新
+        existing.update(updates)
+
+        # 写回 .env 文件
+        try:
+            with open(env_path, 'w', encoding='utf-8') as f:
+                for key, value in existing.items():
+                    if value is None:
+                        continue
+                    if isinstance(value, list):
+                        value = ','.join(str(v) for v in value)
+                    f.write(f"{key}={value}\n")
+
+            # 刷新单例，使配置立即生效
+            self.refresh_from_updates(updates)
+            return True
+        except Exception as e:
+            print(f"保存配置失败: {e}")
+            return False
+
+    def refresh_from_updates(self, updates: dict) -> None:
+        """从更新字典刷新配置属性"""
+        if 'STOCK_LIST' in updates:
+            self.stock_list = [s.strip() for s in str(updates['STOCK_LIST']).split(',') if s.strip()]
+        if 'OPENAI_API_KEY' in updates:
+            self.openai_api_key = updates['OPENAI_API_KEY']
+        if 'OPENAI_BASE_URL' in updates:
+            self.openai_base_url = updates['OPENAI_BASE_URL']
+        if 'OPENAI_MODEL' in updates:
+            self.openai_model = updates['OPENAI_MODEL']
+        if 'GEMINI_API_KEY' in updates:
+            self.gemini_api_key = updates['GEMINI_API_KEY']
+        if 'WECHAT_WEBHOOK_URL' in updates:
+            self.wechat_webhook_url = updates['WECHAT_WEBHOOK_URL']
+        if 'FEISHU_WEBHOOK_URL' in updates:
+            self.feishu_webhook_url = updates['FEISHU_WEBHOOK_URL']
+
     def validate(self) -> List[str]:
         """
         验证配置完整性
