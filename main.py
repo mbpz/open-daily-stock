@@ -29,7 +29,10 @@ import time
 from datetime import datetime, timezone, timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.config import Config
 
 # 配置日志格式
 LOG_FORMAT = '%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s'
@@ -196,7 +199,7 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def run_full_analysis(
-    config: Config,
+    config: "Config",
     args: argparse.Namespace,
     stock_codes: Optional[List[str]] = None
 ):
@@ -291,7 +294,7 @@ def run_full_analysis(
         logger.exception(f"分析流程执行失败: {e}")
 
 
-def start_bot_stream_clients(config: Config) -> None:
+def start_bot_stream_clients(config: "Config") -> None:
     """Start bot stream clients when enabled in config."""
     # Stream 功能已移除，仅保留日志提示
     if config.dingtalk_stream_enabled:
