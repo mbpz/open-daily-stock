@@ -4,9 +4,9 @@
 
 ## 一、项目定位
 
-**纯本地 PC 端 TUI 应用**。用户下载打包好的可执行文件，双击运行即可使用所有功能，无需安装 Python、无需配置服务端、无需 Docker。
+**本地 PC 端 TUI + GUI 双模式应用**。用户下载打包好的可执行文件，双击运行即可使用所有功能，无需安装 Python、无需配置服务端。
 
-**核心场景：** 用户在本地终端查看自选股行情、手动触发股票分析、配置通知渠道。
+**核心场景：** 用户在本地终端或图形界面查看自选股行情、手动触发股票分析、配置通知渠道。
 
 ---
 
@@ -22,15 +22,14 @@
 - 不需要任何服务端
 - 网络只用于：拉取行情数据、拉取 AI 分析结果、推送通知到用户配置的 Webhook
 
-### 2.3 零配置启动
-- 用户安装即用
-- 配置项通过 TUI Config 模块在线修改
-- 不需要手动编辑配置文件
+### 2.3 双模式对等
+- TUI 和 GUI 功能完全对等，共享同一后端
+- 用户可选使用终端（TUI）或图形界面（GUI）
 
 ### 2.4 单一职责
-- TUI 只负责交互（展示、输入、导航）
+- 界面层只负责交互（展示、输入、导航）
+- DataService 后端负责数据拉取、缓存、推送
 - 业务逻辑在 src/（可被 main.py CLI 复用）
-- 数据获取在 data_provider/（可被 TUI 和 CLI 共用）
 
 ---
 
@@ -39,242 +38,265 @@
 ### 3.1 分层结构
 
 ```
-┌─────────────────────────────────────┐
-│           TUI 层（交互）             │
-│  Textual App · 5 个模块视图         │
-└──────────────┬────────────────────┘
-               │
-┌──────────────┴────────────────────┐
-│         核心业务层                   │
-│  src/analyzer · config · storage    │
-│  src/notification · search_service │
-└──────────────┬────────────────────┘
-               │
-┌──────────────┴────────────────────┐
-│         数据层                     │
-│  data_provider/ · SQLite          │
-│  (AkShare · YFinance)             │
-└───────────────────────────────────┘
+┌─────────────────────────────────────────────────┐
+│           界面层（交互）                          │
+│  TUI (Textual)    GUI (Flet)                   │
+└──────────┬──────────────────┬──────────────────┘
+           │    stdio JSON     │
+┌──────────┴──────────────────┴──────────────────┐
+│           DataService (后端守护进程)            │
+│  - 数据拉取 (AkShare/YFinance)                │
+│  - 缓存管理 (SQLite)                           │
+│  - 定时推送 (30s)                              │
+│  - AI 分析 (Gemini/DeepSeek)                   │
+└──────────┬──────────────────┬──────────────────┘
+           │                  │
+┌──────────┴──────────────────┴──────────────────┐
+│           数据层                                │
+│  data_provider/ · SQLite                       │
+└────────────────────────────────────────────────┘
 ```
 
-### 3.2 数据流向
+### 3.2 进程模型
 
 ```
-用户操作（TUI）
+main.py (唯一入口)
     ↓
-TUIApp（路由 + 状态管理）
+fork() → DataService 子进程
     ↓
-DataProviderWrapper（获取行情）
+    ├── stdin: 接收客户端请求 (JSON)
+    ├── stdout: 发送响应/推送数据 (JSON)
+    └── SQLite: 数据持久化
+
+TUI/GUI 客户端
     ↓
-AkShare / YFinance（免费数据源）
-    ↓
-MarketsView（展示）
-    ↓
-状态栏更新（Footer.set_last_update）
+    └── stdin/stdout 连接 DataService
 ```
 
-### 3.3 各模块数据流
+**进程启动流程：**
+1. 用户运行 `main.py`
+2. main.py 检查是否有运行中的 DataService
+3. 如果没有，fork 子进程启动 DataService
+4. TUI/GUI 作为客户端通过 stdio JSON 与 DataService 通信
 
-| 模块 | 数据来源 | 持久化 |
-|------|----------|--------|
-| Markets | DataProviderWrapper → AkShare/YFinance | 否（内存） |
-| Tasks | TaskStore（内存） | 否 |
-| Analyze | 调用 src/core/pipeline.py | 否 |
-| Config | src/config.py → .env | 是（写入 .env） |
-| Logs | logs/ 目录下的日志文件 | 是（日志文件） |
+### 3.3 通信协议
+
+**请求格式（客户端 → DataService）：**
+```json
+{"action": "get_markets"}
+{"action": "refresh_data"}
+{"action": "analyze", "code": "600519"}
+{"action": "get_config"}
+{"action": "update_config", "data": {...}}
+```
+
+**响应格式（DataService → 客户端）：**
+```json
+{"status": "ok", "data": {...}}
+{"status": "error", "message": "..."}
+{"type": "push", "data": {"markets": [...], "timestamp": "..."}}
+```
 
 ---
 
-## 四、用户交互流程
+## 四、数据流向
 
-### 4.1 首次使用
-
+### 4.1 客户端启动
 ```
-启动 TUI
+TUI/GUI 启动
     ↓
-Markets 模块默认显示（无数据）
+连接 DataService (stdio)
     ↓
-用户按 r 手动刷新
+发送 init 请求
     ↓
-获取自选股行情并展示
+DataService 返回当前数据（缓存 or 空）
     ↓
-30s 自动轮询刷新
-```
-
-### 4.2 手动分析流程
-
-```
-用户切换到 Analyze 模块（按 2）
-    ↓
-输入股票代码（如 600519）
-    ↓
-按 Enter 或点击"开始分析"
-    ↓
-TaskStore 添加任务（状态：pending）
-    ↓
-Pipeline 运行分析
-    ↓
-任务状态更新（pending → running → done/failed）
-    ↓
-结果推送到通知渠道
-    ↓
-TUI 内显示分析结果
+客户端展示界面
 ```
 
-### 4.3 配置修改流程
-
+### 4.2 定时刷新
 ```
-用户切换到 Config 模块（按 4）
+DataService 定时器 (30s)
     ↓
-编辑自选股列表输入框
+拉取 AkShare/YFinance 数据
     ↓
-按 Enter 保存
+更新 SQLite 缓存
     ↓
-src.config.stock_list 更新
+主动推送数据到客户端
     ↓
-.env 文件同步写入
+客户端更新界面显示
+```
+
+### 4.3 手动刷新
+```
+用户按 r (TUI) 或点击刷新 (GUI)
     ↓
-Markets 模块自动使用新列表
+客户端发送 refresh_data 请求
+    ↓
+DataService 立即拉取数据
+    ↓
+推送新数据到客户端
+```
+
+### 4.4 AI 分析
+```
+用户输入股票代码
+    ↓
+客户端发送 analyze 请求
+    ↓
+DataService 执行分析 Pipeline
+    ↓
+发送分析结果 + 推送通知
+    ↓
+客户端展示结果
 ```
 
 ---
 
 ## 五、模块设计
 
-### 5.1 TUIApp（路由中心）
+### 5.1 main.py（唯一入口）
 
 ```
 职责：
-- 管理全局状态（_current, _dp, _task_store）
-- 协调 5 个模块的显示/隐藏
-- 处理全局快捷键（1-5/Tab/r/q）
-- 维护自动轮询定时器
+- 检测并 fork DataService 进程
+- 根据参数选择 TUI 或 GUI 模式
+- 管理子进程生命周期
 ```
 
-### 5.2 各模块职责
-
-| 模块 | 职责边界 |
-|------|----------|
-| MarketsView | 只负责行情展示，不处理数据获取 |
-| TasksView | 只负责任务列表展示，不处理任务执行 |
-| AnalyzeView | 只负责输入收集，调用回调函数 |
-| ConfigView | 只负责配置展示和编辑，调用 src.config |
-| LogsView | 只负责日志读取和展示，不处理日志写入 |
-
-### 5.3 状态传递
+### 5.2 DataService（后端守护进程）
 
 ```
-TUIApp.__init__
-    ├── self._dp = DataProviderWrapper  (共享)
-    ├── self._task_store = TaskStore    (共享)
-    └── self._on_analyze_callback = ...  (回调)
+职责：
+- 数据拉取（AkShare/YFinance）
+- SQLite 缓存管理
+- 定时推送数据
+- AI 分析执行
+- 配置管理
 
-compose()
-    ├── MarketsView(self._dp)
-    ├── TasksView(self._task_store)
-    ├── AnalyzeView(self._on_analyze_callback)
-    ├── ConfigView()
-    └── LogsView()
+接口：
+- stdio JSON 通信
+- 监听 stdin，输出到 stdout
+```
+
+### 5.3 TUI / GUI（客户端界面）
+
+```
+职责：
+- 用户交互
+- 数据显示
+- 请求发送
+
+通信：
+- 通过 stdin/stdout 发送 JSON 请求到 DataService
+- 接收 DataService 的响应和推送数据
 ```
 
 ---
 
-## 六、实现细节
+## 六、配置文件
 
-### 6.1 Textual 布局
+### 6.1 配置文件位置
 
-```
-Screen
-├── Header (固定高度 1)
-├── Nav (固定高度 1)
-├── Content Area (动态高度)
-│   ├── MarketsView (display=当前模块)
-│   ├── TasksView (display=非当前模块)
-│   ├── AnalyzeView
-│   ├── ConfigView
-│   └── LogsView
-└── Footer (固定高度 1)
-```
+`~/.open-daily-stock/config.json` 或 `config.json`（工作目录）
 
-切换模块：通过 `action_switch(idx)` 设置 `display=True/False`
+### 6.2 配置结构
 
-### 6.2 行情轮询
-
-```python
-# TUIApp._start_polling
-self._poll_timer = self.set_interval(self._dp.poll_interval, poll)
-
-# poll() 是 async 函数
-async def poll():
-    await self._dp.fetch_all()      # 获取数据
-    markets.refresh()               # 刷新 MarketsView
-    footer.set_last_update(...)    # 更新 Footer 时间戳
+```json
+{
+  "stocks": ["600519", "000001"],
+  "apis": {
+    "gemini_key": "xxx",
+    "deepseek_key": "xxx"
+  },
+  "notifications": {
+    "wecom_webhook": "xxx",
+    "feishu_webhook": "xxx",
+    "telegram_bot_token": "xxx",
+    "smtp_email": "xxx"
+  },
+  "refresh_interval": 30,
+  "ui_mode": "gui"
+}
 ```
 
-### 6.3 任务状态流转
+### 6.3 首次启动引导
 
-```
-用户触发分析
-    ↓
-TaskStore.add_task(code) → status=PENDING
-    ↓
-Pipeline.start → status=RUNNING
-    ↓
-Pipeline.done → status=DONE
-    ↓
-Pipeline.error → status=FAILED
-```
-
-### 6.4 配置持久化
-
-```python
-# ConfigView.on_input_submitted
-self._config.stock_list = new_list  # 内存更新
-# src.config 模块负责写入 .env
-```
+首次运行检测到无配置文件 → 启动引导流程：
+1. 提示用户输入 API keys
+2. 提示用户输入自选股列表
+3. 保存配置到 config.json
+4. 启动主界面
 
 ---
 
 ## 七、设计思想
 
-### 7.1 TUI 是交互层，不是业务层
+### 7.1 单一入口
 
-**错误做法：**
-```python
-class MarketsView:
-    def on_button_pressed(self):
-        # 在 View 里直接调用 API
-        data = ak.stock_zh_a_spot_em()
-```
+`main.py` 是唯一入口，根据参数或自动检测选择 TUI/GUI 模式。DataService 作为子进程运行，客户端不感知进程管理细节。
 
-**正确做法：**
-```python
-class MarketsView:
-    def __init__(self, data_provider):
-        self._dp = data_provider  # 注入依赖
+### 7.2 界面与后端分离
 
-    def render(self):
-        data = self._dp.get_data()  # View 只展示数据
-```
+TUI 和 GUI 共享同一个 DataService 后端，数据完全一致。界面层只负责交互，不处理业务逻辑。
 
-### 7.2 业务逻辑不依赖 TUI
+### 7.3 缓存优先
 
-src/ 下的模块可以被 main.py（CLI）直接调用，TUI 只是新增了一个交互入口。
+DataService 维护本地 SQLite 缓存，即使数据源不可用也能展示历史数据。
 
-### 7.3 数据获取与展示分离
+### 7.4 主动推送
 
-```
-DataProviderWrapper (数据层) ← 获取数据、缓存、自动轮询
-MarketsView (展示层) ← 只调用 get_data() 获取数据进行渲染
-```
-
-### 7.4 配置集中管理
-
-所有配置通过 `src.config.get_config()` 集中访问，不在各个模块里分散读取环境变量。
+DataService 定时拉取数据并主动推送到客户端，客户端无需频繁轮询。
 
 ---
 
-## 八、非目标（Out of Scope）
+## 八、实现细节
+
+### 8.1 DataService 启动
+
+```python
+# main.py
+import subprocess
+import sys
+
+def start_data_service():
+    proc = subprocess.Popen(
+        [sys.executable, '-m', 'src.data_service'],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    return proc
+```
+
+### 8.2 JSON 通信
+
+```python
+# 发送请求
+proc.stdin.write(json.dumps({"action": "get_markets"}).encode())
+proc.stdin.flush()
+
+# 接收响应
+data = json.loads(proc.stdout.readline())
+```
+
+### 8.3 定时推送
+
+```python
+# DataService
+class DataService:
+    def __init__(self):
+        self._timer = threading.Timer(30, self._push_markets)
+        self._timer.start()
+
+    def _push_markets(self):
+        data = self._fetch_markets()
+        self._push({"type": "push", "data": data})
+```
+
+---
+
+## 九、非目标（Out of Scope）
 
 - 不支持 Web UI
 - 不支持远程服务器管理
