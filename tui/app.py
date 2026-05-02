@@ -14,6 +14,7 @@ from tui.widgets.logs import LogsView
 from tui.data.wrapper import DataProviderWrapper
 from tui.data.task_store import TaskStore
 from src.config import get_config
+from src.service_client import ServiceClient
 from typing import Optional
 
 MODULES = [MarketsView, TasksView, AnalyzeView, ConfigView, LogsView]
@@ -46,10 +47,12 @@ class TUIApp(App):
 
     def __init__(self, on_analyze_callback=None):
         super().__init__()
+        self._client = ServiceClient()
         self._current = 0
         self._refresh_task: Optional[asyncio.Task] = None
         self._on_analyze_callback = on_analyze_callback or _make_analyze_callback(self)
         config = get_config()
+        self._markets = self._client.get_markets()
         self._dp = DataProviderWrapper(poll_interval=30)
         self._dp.set_stocks(config.stock_list)
         self._task_store = TaskStore()

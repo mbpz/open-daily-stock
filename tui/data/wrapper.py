@@ -3,6 +3,7 @@ import asyncio
 import logging
 from typing import List, Dict, Optional
 from datetime import datetime, timezone, timedelta
+from src.service_client import ServiceClient
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ class DataProviderWrapper:
         self._stocks: List[str] = []
         self._data: Dict[str, MarketData] = {}
         self._last_update: Optional[str] = None
+        self._client = ServiceClient()
 
     def set_stocks(self, stocks: List[str]):
         self._stocks = stocks
