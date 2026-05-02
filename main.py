@@ -26,6 +26,7 @@ import sys
 import argparse
 import logging
 import time
+import subprocess
 from datetime import datetime, timezone, timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -33,6 +34,33 @@ from typing import List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.config import Config
+
+# DataService 进程管理
+_data_service_proc = None
+
+
+def start_data_service():
+    """启动 DataService 后端进程"""
+    global _data_service_proc
+    if _data_service_proc is None:
+        _data_service_proc = subprocess.Popen(
+            [sys.executable, '-m', 'src.data_service'],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+    return _data_service_proc
+
+
+def stop_data_service():
+    """关闭 DataService 后端进程"""
+    global _data_service_proc
+    if _data_service_proc:
+        try:
+            _data_service_proc.terminate()
+        except:
+            pass
+        _data_service_proc = None
 
 # 配置日志格式
 LOG_FORMAT = '%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s'
@@ -330,6 +358,9 @@ def main() -> int:
     """
     # 解析命令行参数
     args = parse_arguments()
+
+    # 启动 DataService
+    start_data_service()
 
     # === 检查更新 ===
     if args.check_update:
