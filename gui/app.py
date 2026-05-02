@@ -155,3 +155,13 @@ class StockApp:
                 ),
             ])
             self.page.update()
+
+    def update_status(self, text: str):
+        """Update the status bar text"""
+        self.status_text = text
+        self.status_bar.content = ft.Text(
+            text,
+            color=TEXT_SECONDARY,
+            size=14,
+        )
+        self.status_bar.update()
