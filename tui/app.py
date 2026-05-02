@@ -14,7 +14,6 @@ from tui.widgets.logs import LogsView
 from tui.data.wrapper import DataProviderWrapper
 from tui.data.task_store import TaskStore
 from src.config import get_config
-from src.core.pipeline import StockAnalysisPipeline
 from typing import Optional
 
 MODULES = [MarketsView, TasksView, AnalyzeView, ConfigView, LogsView]

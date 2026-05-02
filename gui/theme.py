@@ -1,0 +1,21 @@
+"""Flet GUI 主题配置"""
+
+# 主色调
+PRIMARY_COLOR = "#1a1a2e"
+SECONDARY_COLOR = "#16213e"
+ACCENT_COLOR = "#0f3460"
+HIGHLIGHT_COLOR = "#e94560"
+
+# 文字颜色
+TEXT_PRIMARY = "#e8e8e8"
+TEXT_SECONDARY = "#a0a0a0"
+TEXT_MUTED = "#666666"
+
+# 状态颜色
+SUCCESS_COLOR = "#4caf50"
+ERROR_COLOR = "#f44336"
+WARNING_COLOR = "#ff9800"
+
+# 卡片样式
+CARD_BG = "#16213e"
+CARD_BORDER = "#0f3460"
