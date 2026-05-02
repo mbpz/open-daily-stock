@@ -2,6 +2,8 @@
 import flet as ft
 
 from gui.theme import PRIMARY_COLOR, TEXT_PRIMARY, TEXT_SECONDARY
+
+VERSION = "0.2.1"
 from tui.data.wrapper import DataProviderWrapper
 from tui.data.task_store import TaskStore
 from src.config import get_config
@@ -66,15 +68,21 @@ class StockApp:
             on_change=self._on_nav_change,
         )
 
-        # Status bar
+        # Status bar with version and update button
         self.status_bar = ft.Container(
-            content=ft.Text(
-                self.status_text,
-                color=TEXT_SECONDARY,
-                size=14,
-            ),
+            content=ft.Row([
+                ft.Text(f"最后更新: {self.status_text}", color=TEXT_SECONDARY, size=14),
+                ft.Container(expand=True),
+                ft.Text(f"v{VERSION}", color=TEXT_SECONDARY, size=12),
+                ft.IconButton(
+                    icon=ft.Icons.UPDATE,
+                    on_click=self._check_update,
+                    tooltip="检查更新",
+                ),
+            ]),
             padding=10,
             bgcolor=PRIMARY_COLOR,
+            on_click=self._install_update,
         )
 
         # Content area
@@ -159,9 +167,49 @@ class StockApp:
     def update_status(self, text: str):
         """Update the status bar text"""
         self.status_text = text
-        self.status_bar.content = ft.Text(
-            text,
-            color=TEXT_SECONDARY,
-            size=14,
-        )
+        self.status_bar.content = ft.Row([
+            ft.Text(f"最后更新: {self.status_text}", color=TEXT_SECONDARY, size=14),
+            ft.Container(expand=True),
+            ft.Text(f"v{VERSION}", color=TEXT_SECONDARY, size=12),
+            ft.IconButton(
+                icon=ft.Icons.UPDATE,
+                on_click=self._check_update,
+                tooltip="检查更新",
+            ),
+        ])
         self.status_bar.update()
+
+    def _check_update(self, e):
+        """Check for application updates"""
+        from src.update_service import UpdateService
+        latest, url = UpdateService.check_latest_version()
+        if latest:
+            self.update_status(f"发现新版本 {latest}，点击更新")
+            self._pending_update_url = url
+        else:
+            self.page.show_snack_bar(
+                ft.SnackBar(content=ft.Text(f"已是最新版本 v{VERSION}"), open=True)
+            )
+
+    def _install_update(self, e):
+        """Download and install pending update"""
+        if hasattr(self, '_pending_update_url') and self._pending_update_url:
+            url = self._pending_update_url
+            self.update_status("正在下载更新...")
+            # Run download in background
+            self.page.run_task(self._download_and_install, url)
+        else:
+            # Status bar click with no update available - run check
+            self._check_update(e)
+
+    async def _download_and_install(self, url: str):
+        """Download and install update asynchronously"""
+        from src.update_service import UpdateService
+        try:
+            success = UpdateService.download_and_install(url)
+            if success:
+                self.update_status("更新完成，重启应用")
+            else:
+                self.update_status("更新失败")
+        except Exception as ex:
+            self.update_status(f"更新失败: {ex}")
