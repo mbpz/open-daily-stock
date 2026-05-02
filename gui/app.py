@@ -4,7 +4,7 @@ import flet as ft
 from gui.theme import PRIMARY_COLOR, TEXT_PRIMARY, TEXT_SECONDARY
 
 VERSION = "0.2.1"
-from tui.data.wrapper import DataProviderWrapper
+from src.service_client import ServiceClient
 from tui.data.task_store import TaskStore
 from src.config import get_config
 from src.core.pipeline import StockAnalysisPipeline
@@ -21,13 +21,8 @@ class StockApp:
         self.nav_index = 0
         self.status_text = "最后更新"
 
-        # Initialize data provider
-        self._dp = DataProviderWrapper()
-        config = get_config()
-        self._dp.set_stocks(config.stock_list)
-
-        # Initialize analysis pipeline
-        self._pipeline = StockAnalysisPipeline(config)
+        # Initialize ServiceClient for DataService communication
+        self._client = ServiceClient()
 
         # Initialize task store
         self._task_store = TaskStore()
@@ -141,7 +136,7 @@ class StockApp:
             page_class = getattr(module, class_map[page_name])
             # Pass data provider to pages that need it
             if page_name == "markets":
-                self.content_area.content = page_class(self, self._dp)
+                self.content_area.content = page_class(self, self._client)
             elif page_name == "analyze":
                 self.content_area.content = page_class(self, self._pipeline)
             elif page_name == "tasks":

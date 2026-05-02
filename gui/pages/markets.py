@@ -7,10 +7,10 @@ from gui.theme import SUCCESS_COLOR, ERROR_COLOR, TEXT_SECONDARY, CARD_BG, CARD_
 class MarketsPage(ft.Container):
     """行情展示页面"""
 
-    def __init__(self, app, data_provider):
+    def __init__(self, app, service_client):
         super().__init__()
         self.app = app
-        self._data_provider = data_provider
+        self._client = service_client
 
         # 标题栏
         header = ft.Row([
@@ -69,30 +69,29 @@ class MarketsPage(ft.Container):
         )
         self._table_container.update()
 
-    def _load_data(self):
+    def _load_data(self, markets):
         """加载行情数据"""
-        data = self._data_provider.get_data()
-        for code, market_data in data.items():
-            change_str = f"{market_data.change:+.2f}%" if market_data.change != 0 else "0.00%"
-            change_color = SUCCESS_COLOR if market_data.change >= 0 else ERROR_COLOR
+        for market in markets:
+            change = market.get('change', 0)
+            change_str = f"{change:+.2f}%" if change != 0 else "0.00%"
+            change_color = SUCCESS_COLOR if change >= 0 else ERROR_COLOR
             self.table.rows.append(
                 ft.DataRow(cells=[
-                    ft.DataCell(ft.Text(market_data.code)),
-                    ft.DataCell(ft.Text(market_data.name)),
-                    ft.DataCell(ft.Text(f"{market_data.price:.2f}")),
+                    ft.DataCell(ft.Text(market.get('code', ''))),
+                    ft.DataCell(ft.Text(market.get('name', ''))),
+                    ft.DataCell(ft.Text(f"{market.get('price', 0):.2f}")),
                     ft.DataCell(ft.Text(change_str, color=change_color)),
-                    ft.DataCell(ft.Text(market_data.volume)),
+                    ft.DataCell(ft.Text(market.get('volume', ''))),
                 ])
             )
 
     async def _fetch_and_update(self):
         """异步获取数据并更新界面"""
-        await self._data_provider.fetch_all()
+        markets = self._client.get_markets()
         self.table.rows.clear()
-        self._load_data()
+        self._load_data(markets)
         self.update()
-        last_update = self._data_provider.get_last_update()
-        self.app.update_status(last_update or datetime.now().strftime("%H:%M:%S"))
+        self.app.update_status(datetime.now().strftime("%H:%M:%S"))
 
     def _refresh(self, e):
         """刷新数据"""
