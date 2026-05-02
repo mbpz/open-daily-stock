@@ -195,6 +195,12 @@ def parse_arguments() -> argparse.Namespace:
         help='启动 Textual TUI 界面'
     )
 
+    parser.add_argument(
+        '--gui',
+        action='store_true',
+        help='启动 Flet 桌面客户端'
+    )
+
     return parser.parse_args()
 
 
@@ -312,6 +318,12 @@ def main() -> int:
     """
     # 解析命令行参数
     args = parse_arguments()
+
+    # === GUI 模式：启动 Flet 桌面客户端 ===
+    if args.gui:
+        from gui.main import main as gui_main
+        gui_main()
+        return 0
 
     # === TUI 模式：直接启动 TUI，不加载其他模块 ===
     if args.tui:
