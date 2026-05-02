@@ -352,12 +352,17 @@ def start_bot_stream_clients(config: "Config") -> None:
 def main() -> int:
     """
     主入口函数
-    
+
     Returns:
         退出码（0 表示成功）
     """
     # 解析命令行参数
     args = parse_arguments()
+
+    # 检查是否需要引导首次配置
+    if not os.path.exists("config.json"):
+        from src.setup_wizard import run_wizard
+        run_wizard()
 
     # 启动 DataService
     start_data_service()
