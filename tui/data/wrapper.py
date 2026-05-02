@@ -3,7 +3,6 @@ import asyncio
 import logging
 from typing import List, Dict, Optional
 from datetime import datetime, timezone, timedelta
-import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +68,7 @@ class DataProviderWrapper:
     async def _fetch_yfinance(self, code: str) -> Optional[MarketData]:
         """Fetch HK/US data using YFinanceFetcher."""
         try:
+            import pandas as pd  # lazy import - only needed when yfinance data arrives
             from data_provider.yfinance_fetcher import YfinanceFetcher
             fetcher = YfinanceFetcher()
             df = await asyncio.to_thread(fetcher.get_daily_data, code)
