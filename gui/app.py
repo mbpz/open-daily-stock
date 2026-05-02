@@ -2,6 +2,10 @@
 import flet as ft
 
 from gui.theme import PRIMARY_COLOR, TEXT_PRIMARY, TEXT_SECONDARY
+from tui.data.wrapper import DataProviderWrapper
+from tui.data.task_store import TaskStore
+from src.config import get_config
+from src.core.pipeline import StockAnalysisPipeline
 
 
 class StockApp:
@@ -14,6 +18,17 @@ class StockApp:
 
         self.nav_index = 0
         self.status_text = "最后更新"
+
+        # Initialize data provider
+        self._dp = DataProviderWrapper()
+        config = get_config()
+        self._dp.set_stocks(config.stock_list)
+
+        # Initialize analysis pipeline
+        self._pipeline = StockAnalysisPipeline(config)
+
+        # Initialize task store
+        self._task_store = TaskStore()
 
         self._build_ui()
         self._load_page("markets")
@@ -116,7 +131,15 @@ class StockApp:
         try:
             module = __import__(page_map[page_name], fromlist=[class_map[page_name]])
             page_class = getattr(module, class_map[page_name])
-            self.content_area.content = page_class()
+            # Pass data provider to pages that need it
+            if page_name == "markets":
+                self.content_area.content = page_class(self, self._dp)
+            elif page_name == "analyze":
+                self.content_area.content = page_class(self, self._pipeline)
+            elif page_name == "tasks":
+                self.content_area.content = page_class(self, self._task_store)
+            else:
+                self.content_area.content = page_class(self)
             self.page.update()
         except (ImportError, AttributeError) as ex:
             self.content_area.content = ft.Column([
