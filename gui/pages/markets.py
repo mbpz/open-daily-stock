@@ -24,7 +24,7 @@ class MarketsPage(ft.UserControl):
             ),
         ])
 
-        # 行情表格
+        # 行情表格 - 初始显示加载占位
         self.table = ft.DataTable(
             columns=[
                 ft.DataColumn(ft.Text("代码", weight=ft.FontWeight.BOLD)),
@@ -36,21 +36,39 @@ class MarketsPage(ft.UserControl):
             rows=[],
         )
 
-        self._load_data()
+        self._table_container = ft.Container(
+            content=ft.ListView([self.table], expand=True),
+            padding=10,
+            bgcolor=CARD_BG,
+            border_radius=10,
+        )
 
         return ft.Container(
             content=ft.Column([
                 header,
                 ft.Divider(height=2, color=CARD_BORDER),
-                ft.Container(
-                    content=ft.ListView([self.table], expand=True),
-                    padding=10,
-                    bgcolor=CARD_BG,
-                    border_radius=10,
-                ),
+                self._table_container,
             ]),
             padding=10,
         )
+
+    def on_mount(self):
+        """生命周期钩子 - 页面挂载时触发异步数据获取"""
+        self.app.page.run_task(self._fetch_and_update)
+
+    def _show_placeholder(self):
+        """显示加载占位符"""
+        self.table.rows.clear()
+        self.table.rows.append(
+            ft.DataRow(cells=[
+                ft.DataCell(ft.Text("点击刷新获取数据", color=TEXT_SECONDARY)),
+                ft.DataCell(ft.Text("")),
+                ft.DataCell(ft.Text("")),
+                ft.DataCell(ft.Text("")),
+                ft.DataCell(ft.Text("")),
+            ])
+        )
+        self._table_container.update()
 
     def _load_data(self):
         """加载行情数据"""

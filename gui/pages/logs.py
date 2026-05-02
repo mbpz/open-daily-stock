@@ -49,7 +49,14 @@ class LogsPage(ft.UserControl):
                 log_files = sorted(log_dir.glob("stock_analysis_*.log"))
                 if log_files:
                     latest_log = log_files[-1]
-                    content = latest_log.read_text(encoding="utf-8")
+                    try:
+                        content = latest_log.read_text(encoding="utf-8")
+                    except PermissionError:
+                        self._log_content.content = ft.Text(
+                            f"权限不足: {latest_log}", color="#f44336"
+                        )
+                        self._log_content.update()
+                        return
                     lines = content.split("\n")[-100:]
                     display = "\n".join(lines)
                     self._log_content.content = ft.Text(

@@ -1,6 +1,6 @@
 """任务历史页面"""
 import flet as ft
-from gui.theme import CARD_BG, CARD_BORDER, TEXT_SECONDARY, SUCCESS_COLOR, WARNING_COLOR, ERROR_COLOR
+from gui.theme import CARD_BG, CARD_BORDER, TEXT_SECONDARY, SUCCESS_COLOR, WARNING_COLOR, ERROR_COLOR, DONE_BG
 
 # Status icons
 STATUS_ICONS = {
@@ -67,24 +67,26 @@ class TasksPage(ft.UserControl):
             elif task.error:
                 result_text = f"Error: {task.error}"
 
-            card_content = ft.Row([
-                ft.Column([
-                    ft.Text(f"{task.code}", weight=ft.FontWeight.BOLD),
-                    ft.Text(task.timestamp, color=TEXT_SECONDARY, size=12),
+            card_content = ft.Column([
+                ft.Row([
+                    ft.Column([
+                        ft.Text(f"{task.code}", weight=ft.FontWeight.BOLD),
+                        ft.Text(task.timestamp, color=TEXT_SECONDARY, size=12),
+                    ]),
+                    ft.Container(expand=True),
+                    ft.Container(
+                        content=ft.Text(f"{status_icon} {status_str}", color=status_color),
+                        padding=5,
+                        bgcolor=DONE_BG if status_str == "DONE" else "#2d2d2d",
+                        border_radius=5,
+                    ),
                 ]),
-                ft.Container(expand=True),
-                ft.Container(
-                    content=ft.Text(f"{status_icon} {status_str}", color=status_color),
-                    padding=5,
-                    bgcolor="#1b5e20" if status_str == "DONE" else "#2d2d2d",
-                    border_radius=5,
-                ),
             ])
 
             # Add result info if available
             if result_text:
                 card_content.controls.append(
-                    ft.Text(f"Result: {result_text[:50]}..." if len(result_text) > 50 else f"Result: {result_text}")
+                    ft.Text(f"Result: {result_text[:50]}..." if len(result_text) > 50 else f"Result: {result_text}", size=12)
                 )
 
             self.task_list.controls.append(
