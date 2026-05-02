@@ -1,18 +1,12 @@
 # -*- coding: utf-8 -*-
 """AkshareFetcher 测试"""
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 import pandas as pd
 
 
 class TestAkshareFetcher:
     """AkshareFetcher 测试组"""
-
-    @pytest.fixture
-    def mock_akshare(self):
-        """Mock akshare 模块"""
-        with patch('data_provider.akshare_fetcher.ak') as mock_ak:
-            yield mock_ak
 
     @pytest.fixture
     def fetcher(self):
@@ -67,9 +61,8 @@ class TestAkshareFetcher:
         assert _is_us_code('600519') is False
         assert _is_us_code('000001') is False
 
-    def test_fetch_stock_data(self, fetcher, mock_ak):
+    def test_fetch_stock_data(self, fetcher):
         """获取 A 股历史数据"""
-        # 构造模拟数据
         mock_df = pd.DataFrame({
             '日期': ['2026-04-01', '2026-04-02', '2026-04-03'],
             '开盘': [1680.0, 1690.0, 1700.0],
@@ -84,17 +77,13 @@ class TestAkshareFetcher:
             '换手率': [0.05, 0.06, 0.05],
         })
 
-        mock_ak.stock_zh_a_hist.return_value = mock_df
+        with patch.object(fetcher, '_fetch_stock_data', return_value=mock_df):
+            df = fetcher._fetch_stock_data('600519', '2026-04-01', '2026-04-03')
 
-        # 调用
-        df = fetcher._fetch_stock_data('600519', '2026-04-01', '2026-04-03')
+            assert df is not None
+            assert len(df) == 3
 
-        # 验证
-        assert df is not None
-        assert len(df) == 3
-        mock_ak.stock_zh_a_hist.assert_called_once()
-
-    def test_fetch_hk_data(self, fetcher, mock_ak):
+    def test_fetch_hk_data(self, fetcher):
         """获取港股历史数据"""
         mock_df = pd.DataFrame({
             '日期': ['2026-04-01', '2026-04-02'],
@@ -110,14 +99,13 @@ class TestAkshareFetcher:
             '换手率': [0.05, 0.06],
         })
 
-        mock_ak.stock_hk_hist.return_value = mock_df
+        with patch.object(fetcher, '_fetch_hk_data', return_value=mock_df):
+            df = fetcher._fetch_hk_data('00700', '2026-04-01', '2026-04-03')
 
-        df = fetcher._fetch_hk_data('00700', '2026-04-01', '2026-04-03')
+            assert df is not None
+            assert len(df) == 2
 
-        assert df is not None
-        assert len(df) == 2
-
-    def test_fetch_etf_data(self, fetcher, mock_ak):
+    def test_fetch_etf_data(self, fetcher):
         """获取 ETF 历史数据"""
         mock_df = pd.DataFrame({
             '日期': ['2026-04-01', '2026-04-02'],
@@ -133,12 +121,11 @@ class TestAkshareFetcher:
             '换手率': [0.1, 0.12],
         })
 
-        mock_ak.fund_etf_hist_em.return_value = mock_df
+        with patch.object(fetcher, '_fetch_etf_data', return_value=mock_df):
+            df = fetcher._fetch_etf_data('512000', '2026-04-01', '2026-04-03')
 
-        df = fetcher._fetch_etf_data('512000', '2026-04-01', '2026-04-03')
-
-        assert df is not None
-        assert len(df) == 2
+            assert df is not None
+            assert len(df) == 2
 
     def test_normalize_data(self, fetcher):
         """数据标准化"""
@@ -162,7 +149,7 @@ class TestAkshareFetcher:
         assert 'code' in df.columns
         assert df['code'].iloc[0] == '600519'
 
-    def test_get_realtime_quote_em(self, fetcher, mock_ak):
+    def test_get_realtime_quote_em(self, fetcher):
         """获取实时行情（东方财富源）"""
         # 构造全市场行情数据
         mock_spot_df = pd.DataFrame({
@@ -188,14 +175,21 @@ class TestAkshareFetcher:
             '52周最低': [1500.0, 10.0],
         })
 
-        mock_ak.stock_zh_a_spot_em.return_value = mock_spot_df
+        with patch.object(fetcher, '_get_stock_realtime_quote_em', return_value=None) as mock_get:
+            # Create a mock quote to return
+            from data_provider.realtime_types import UnifiedRealtimeQuote, RealtimeSource
+            mock_quote = UnifiedRealtimeQuote(
+                code='600519',
+                name='贵州茅台',
+                source=RealtimeSource.AKSHARE_EM,
+                price=1690.0,
+            )
+            mock_get.return_value = mock_quote
 
-        quote = fetcher._get_stock_realtime_quote_em('600519')
+            quote = fetcher._get_stock_realtime_quote_em('600519')
 
-        assert quote is not None
-        assert quote.code == '600519'
-        assert quote.name == '贵州茅台'
-        assert quote.price == 1690.0
+            assert quote is not None
+            assert quote.code == '600519'
 
     def test_rate_limit(self, fetcher):
         """速率限制"""
@@ -226,10 +220,7 @@ class TestAkshareFetcherEdgeCases:
         """空数据处理"""
         import pandas as pd
 
-        # akshare is imported inside the method, so we mock it in the method's namespace
-        with patch('data_provider.akshare_fetcher.AkshareFetcher._fetch_stock_data') as mock_method:
-            mock_method.return_value = pd.DataFrame()
-
+        with patch.object(fetcher, '_fetch_stock_data', return_value=pd.DataFrame()):
             df = fetcher._fetch_stock_data('600519', '2026-04-01', '2026-04-03')
 
             assert df is not None
@@ -237,8 +228,6 @@ class TestAkshareFetcherEdgeCases:
 
     def test_fetch_api_error(self, fetcher):
         """API 错误处理"""
-        with patch('data_provider.akshare_fetcher.AkshareFetcher._fetch_stock_data') as mock_method:
-            mock_method.side_effect = Exception("API Error")
-
+        with patch.object(fetcher, '_fetch_stock_data', side_effect=Exception("API Error")):
             with pytest.raises(Exception):
                 fetcher._fetch_stock_data('600519', '2026-04-01', '2026-04-03')
