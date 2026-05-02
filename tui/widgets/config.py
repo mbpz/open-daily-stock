@@ -58,6 +58,8 @@ class ConfigView(Static):
         self.styles.background = "#1a1a2e"
         self.styles.color = "#e8e8e8"
         self.styles.padding = (1, 1)
+        # 确保 ConfigView 获得焦点以接收键盘事件
+        self.focus()
 
     def on_key(self, event: Key):
         if event.key == "escape":

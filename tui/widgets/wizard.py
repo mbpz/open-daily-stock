@@ -71,6 +71,8 @@ class WizardView(Static):
         self.styles.background = "#1a1a2e"
         self.styles.color = "#e8e8e8"
         self.styles.padding = (1, 2)
+        # 确保 WizardView 获得焦点以接收键盘事件
+        self.focus()
 
     def on_key(self, event: Key):
         step = self.WIZARD_STEPS[self._current_step]
@@ -127,6 +129,8 @@ class WizardView(Static):
             self._field_values[field["key"]] = event.value
             input_widget.remove()
             self._refresh_display()
+            # 重新聚焦到 wizard 以接收键盘事件
+            self.focus()
 
         input_widget.on_submit = on_submit
 
