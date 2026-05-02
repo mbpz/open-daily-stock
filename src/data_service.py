@@ -5,6 +5,8 @@ import sqlite3
 from datetime import datetime
 from typing import Dict, Any, List
 
+from .config import get_config
+
 class DataService:
     def __init__(self):
         self._running = True
@@ -59,8 +61,43 @@ class DataService:
         return [{"code": r[0], "name": r[1], "price": r[2], "change_pct": r[3], "volume": r[4]} for r in rows]
 
     def _refresh_markets(self):
-        """刷新行情数据（TODO: 调用 AkShare/YFinance）"""
-        pass
+        """刷新行情数据"""
+        from data_provider.efinance_fetcher import EfinanceFetcher
+
+        # 使用 EfinanceFetcher 作为主要数据源
+        fetcher = EfinanceFetcher()
+
+        # 获取配置中的股票列表
+        config = get_config()
+        stocks = config.stock_list
+
+        for stock in stocks:
+            try:
+                # 获取日线数据
+                df = fetcher.get_daily_data(stock, days=1)
+                if df is not None and len(df) > 0:
+                    latest = df.iloc[-1]
+                    self._save_market({
+                        "code": stock,
+                        "name": latest.get("name", ""),
+                        "price": latest.get("close", 0),
+                        "change_pct": latest.get("pct_chg", 0),
+                        "volume": latest.get("volume", 0),
+                    })
+            except Exception as e:
+                print(f"Failed to fetch {stock}: {e}", file=sys.stderr)
+
+    def _save_market(self, market: Dict):
+        """保存行情到数据库"""
+        conn = sqlite3.connect(self._db_path)
+        c = conn.cursor()
+        c.execute("""
+            INSERT OR REPLACE INTO markets (code, name, price, change_pct, volume, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (market["code"], market["name"], market["price"],
+              market["change_pct"], market["volume"], datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
 
     def run(self):
         """主循环：读取 stdin，处理请求"""
