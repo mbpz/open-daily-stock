@@ -126,6 +126,10 @@ class Config:
     schedule_time: str = "18:00"              # 每日推送时间（HH:MM 格式）
     market_review_enabled: bool = True        # 是否启用大盘复盘
 
+    # === 定时刷新配置 ===
+    schedule_refresh_enabled: bool = False
+    schedule_refresh_time: str = "18:00"      # HH:MM format, daily refresh time
+
     # === 实时行情增强数据配置 ===
     # 实时行情开关（关闭后使用历史收盘价进行分析）
     enable_realtime_quote: bool = True
@@ -334,6 +338,8 @@ class Config:
             schedule_enabled=os.getenv('SCHEDULE_ENABLED', 'false').lower() == 'true',
             schedule_time=os.getenv('SCHEDULE_TIME', '18:00'),
             market_review_enabled=os.getenv('MARKET_REVIEW_ENABLED', 'true').lower() == 'true',
+            schedule_refresh_enabled=os.getenv('SCHEDULE_REFRESH_ENABLED', 'false').lower() == 'true',
+            schedule_refresh_time=os.getenv('SCHEDULE_REFRESH_TIME', '18:00'),
             webui_enabled=os.getenv('WEBUI_ENABLED', 'false').lower() == 'true',
             webui_host=os.getenv('WEBUI_HOST', '127.0.0.1'),
             webui_port=int(os.getenv('WEBUI_PORT', '8000')),
