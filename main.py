@@ -201,6 +201,18 @@ def parse_arguments() -> argparse.Namespace:
         help='启动 Flet 桌面客户端'
     )
 
+    parser.add_argument(
+        '--check-update',
+        action='store_true',
+        help='检查应用程序更新'
+    )
+
+    parser.add_argument(
+        '--refresh-data',
+        action='store_true',
+        help='刷新所有股票数据并重新分析'
+    )
+
     return parser.parse_args()
 
 
@@ -318,6 +330,32 @@ def main() -> int:
     """
     # 解析命令行参数
     args = parse_arguments()
+
+    # === 检查更新 ===
+    if args.check_update:
+        from src.update_service import UpdateService
+        latest, url = UpdateService.check_latest_version()
+        current = UpdateService.get_current_version()
+        if latest:
+            print(f"发现新版本: {latest} (当前: {current})")
+            print(f"下载链接: {url}")
+        else:
+            print(f"已是最新版本: {current}")
+        return 0
+
+    # === 刷新数据 ===
+    if args.refresh_data:
+        from src.refresh_service import RefreshService
+        config = get_config()
+        import asyncio
+
+        async def run_refresh():
+            service = RefreshService(config)
+            return await service.refresh_all()
+
+        results = asyncio.run(run_refresh())
+        print(f"刷新完成: {len(results)} 只股票")
+        return 0
 
     # === GUI 模式：启动 Flet 桌面客户端 ===
     if args.gui:
