@@ -4,7 +4,7 @@ from datetime import datetime
 from gui.theme import SUCCESS_COLOR, ERROR_COLOR, TEXT_SECONDARY, CARD_BG, CARD_BORDER
 
 
-class MarketsPage(ft.UserControl):
+class MarketsPage(ft.Container):
     """行情展示页面"""
 
     def __init__(self, app, data_provider):
@@ -12,13 +12,12 @@ class MarketsPage(ft.UserControl):
         self.app = app
         self._data_provider = data_provider
 
-    def build(self):
         # 标题栏
         header = ft.Row([
             ft.Text("自选股行情", size=24, weight=ft.FontWeight.BOLD),
             ft.Container(expand=True),
             ft.IconButton(
-                icon=ft.icons.REFRESH,
+                icon=ft.Icons.REFRESH,
                 on_click=self._refresh,
                 tooltip="刷新",
             ),
@@ -43,7 +42,7 @@ class MarketsPage(ft.UserControl):
             border_radius=10,
         )
 
-        return ft.Container(
+        self.content = ft.Container(
             content=ft.Column([
                 header,
                 ft.Divider(height=2, color=CARD_BORDER),

@@ -4,7 +4,7 @@ import asyncio
 from gui.theme import CARD_BG, CARD_BORDER, SUCCESS_COLOR, ERROR_COLOR, ACCENT_COLOR
 
 
-class AnalyzePage(ft.UserControl):
+class AnalyzePage(ft.Container):
     """股票分析页面"""
 
     def __init__(self, app, pipeline=None):
@@ -12,22 +12,23 @@ class AnalyzePage(ft.UserControl):
         self.app = app
         self._pipeline = pipeline
 
-    def build(self):
         header = ft.Text("股票分析", size=24, weight=ft.FontWeight.BOLD)
+
+        self._stock_input = ft.TextField(
+            hint_text="如: 600519",
+            width=200,
+        )
 
         input_row = ft.Row([
             ft.Text("股票代码:", width=100),
-            self._stock_input := ft.TextField(
-                hint_text="如: 600519",
-                width=200,
-            ),
+            self._stock_input,
             ft.Container(width=20),
-            ft.ElevatedButton(
+            ft.Button(
                 "开始分析",
-                icon=ft.icons.PLAY_ARROW,
+                icon=ft.Icons.PLAY_ARROW,
                 on_click=self._start_analysis,
                 bgcolor=ACCENT_COLOR,
-                color=ft.WHITE,
+                color=ft.Colors.WHITE,
             ),
         ])
 
@@ -39,7 +40,7 @@ class AnalyzePage(ft.UserControl):
             visible=True,
         )
 
-        return ft.Container(
+        self.content = ft.Container(
             content=ft.Column([
                 header,
                 ft.Divider(height=2, color=CARD_BORDER),

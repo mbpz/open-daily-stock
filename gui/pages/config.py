@@ -4,7 +4,7 @@ from gui.theme import CARD_BG, CARD_BORDER, ACCENT_COLOR
 from src.config import get_config
 
 
-class ConfigPage(ft.UserControl):
+class ConfigPage(ft.Container):
     """配置管理页面"""
 
     def __init__(self, app):
@@ -18,7 +18,6 @@ class ConfigPage(ft.UserControl):
         self._wechat_field = None
         self._feishu_field = None
 
-    def build(self):
         header = ft.Text("配置管理", size=24, weight=ft.FontWeight.BOLD)
 
         # Load current config values
@@ -42,15 +41,15 @@ class ConfigPage(ft.UserControl):
             ("飞书:", config.feishu_webhook_url or ""),
         ])
 
-        save_btn = ft.ElevatedButton(
+        save_btn = ft.Button(
             "保存配置",
-            icon=ft.icons.SAVE,
+            icon=ft.Icons.SAVE,
             on_click=self._save_config,
             bgcolor=ACCENT_COLOR,
-            color=ft.WHITE,
+            color=ft.Colors.WHITE,
         )
 
-        return ft.Container(
+        self.content = ft.Container(
             content=ft.Column([
                 header,
                 ft.Divider(height=2, color=CARD_BORDER),

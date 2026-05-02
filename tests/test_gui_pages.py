@@ -54,8 +54,8 @@ class TestMarketsPage:
         """test_markets_page_empty_initialization - MarketsPage with no data initializes correctly"""
         from gui.pages.markets import MarketsPage
         page = MarketsPage(mock_app, mock_data_provider)
-        # Build should not raise
-        control = page.build()
+        # Content is built in __init__, access via .content
+        control = page.content
         assert control is not None
         # Table should exist with columns but no rows
         assert page.table is not None
@@ -65,7 +65,8 @@ class TestMarketsPage:
         """test_markets_page_with_data - MarketsPage displays data"""
         from gui.pages.markets import MarketsPage
         page = MarketsPage(mock_app, mock_data_provider_with_data)
-        page.build()
+        # Content is built in __init__
+        page.content
         # Manually load data to test _load_data
         page._load_data()
         # Should have rows
@@ -96,14 +97,14 @@ class TestTasksPage:
         """test_tasks_page_empty_initialization - TasksPage with no task store"""
         from gui.pages.tasks import TasksPage
         page = TasksPage(mock_app, None)
-        control = page.build()
+        control = page.content
         assert control is not None
 
     def test_tasks_page_with_tasks(self, mock_app, task_store):
         """test_tasks_page_with_tasks - TasksPage displays tasks"""
         from gui.pages.tasks import TasksPage
         page = TasksPage(mock_app, task_store)
-        page.build()
+        # Content is built in __init__
         # Should have controls in task_list
         assert len(page.task_list.controls) == 2
 
@@ -124,7 +125,7 @@ class TestLogsPage:
         """test_logs_page_initialization - LogsPage initializes correctly"""
         from gui.pages.logs import LogsPage
         page = LogsPage(mock_app)
-        control = page.build()
+        control = page.content
         assert control is not None
         assert page._log_content is not None
 
@@ -152,7 +153,7 @@ class TestAnalyzePage:
         """test_analyze_page_initialization - AnalyzePage initializes correctly"""
         from gui.pages.analyze import AnalyzePage
         page = AnalyzePage(mock_app, mock_pipeline)
-        control = page.build()
+        control = page.content
         assert control is not None
 
 
@@ -172,5 +173,5 @@ class TestConfigPage:
         """test_config_page_initialization - ConfigPage initializes correctly"""
         from gui.pages.config import ConfigPage
         page = ConfigPage(mock_app)
-        control = page.build()
+        control = page.content
         assert control is not None

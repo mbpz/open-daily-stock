@@ -18,7 +18,7 @@ STATUS_COLORS = {
     "FAILED": ERROR_COLOR,
 }
 
-class TasksPage(ft.UserControl):
+class TasksPage(ft.Container):
     """任务历史页面"""
 
     def __init__(self, app, task_store=None):
@@ -26,7 +26,6 @@ class TasksPage(ft.UserControl):
         self.app = app
         self.task_store = task_store
 
-    def build(self):
         header = ft.Text("历史任务", size=24, weight=ft.FontWeight.BOLD)
 
         self.task_list = ft.ListView(
@@ -37,7 +36,7 @@ class TasksPage(ft.UserControl):
 
         self._load_tasks()
 
-        return ft.Container(
+        self.content = ft.Container(
             content=ft.Column([
                 header,
                 ft.Divider(height=2, color=CARD_BORDER),

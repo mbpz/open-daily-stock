@@ -43,23 +43,23 @@ class StockApp:
             min_extended_width=200,
             destinations=[
                 ft.NavigationRailDestination(
-                    icon=ft.icons.SHOW_CHART,
+                    icon=ft.Icons.SHOW_CHART,
                     label="行情"
                 ),
                 ft.NavigationRailDestination(
-                    icon=ft.icons.ANALYTICS,
+                    icon=ft.Icons.ANALYTICS,
                     label="分析"
                 ),
                 ft.NavigationRailDestination(
-                    icon=ft.icons.HISTORY,
+                    icon=ft.Icons.HISTORY,
                     label="任务"
                 ),
                 ft.NavigationRailDestination(
-                    icon=ft.icons.SETTINGS,
+                    icon=ft.Icons.SETTINGS,
                     label="配置"
                 ),
                 ft.NavigationRailDestination(
-                    icon=ft.icons.DESCRIPTION,
+                    icon=ft.Icons.DESCRIPTION,
                     label="日志"
                 ),
             ],
