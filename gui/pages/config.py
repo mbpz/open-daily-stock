@@ -2,6 +2,7 @@
 import flet as ft
 from gui.theme import CARD_BG, CARD_BORDER, ACCENT_COLOR
 from src.config import get_config
+from src.i18n import _, set_language
 
 
 class ConfigPage(ft.Container):
@@ -17,6 +18,7 @@ class ConfigPage(ft.Container):
         self._stock_list_field = None
         self._wechat_field = None
         self._feishu_field = None
+        self._language_dropdown = None
 
         header = ft.Text("配置管理", size=24, weight=ft.FontWeight.BOLD)
 
@@ -41,6 +43,28 @@ class ConfigPage(ft.Container):
             ("飞书:", config.feishu_webhook_url or ""),
         ])
 
+        # Language section
+        self._language_dropdown = ft.Dropdown(
+            label=_("语言"),
+            value=config.language or "zh_CN",
+            options=[
+                ft.dropdown.Option("zh_CN", "简体中文"),
+                ft.dropdown.Option("en_US", "English"),
+            ],
+            on_select=self._on_language_change,
+        )
+
+        language_section = ft.Container(
+            content=ft.Column([
+                ft.Text(_("语言设置"), size=16, weight=ft.FontWeight.BOLD),
+                ft.Container(height=10),
+                self._language_dropdown,
+            ]),
+            padding=15,
+            bgcolor=CARD_BG,
+            border_radius=10,
+        )
+
         save_btn = ft.Button(
             "保存配置",
             icon=ft.Icons.SAVE,
@@ -58,6 +82,8 @@ class ConfigPage(ft.Container):
                 stock_section,
                 ft.Container(height=20),
                 notify_section,
+                ft.Container(height=20),
+                language_section,
                 ft.Container(height=20),
                 save_btn,
             ]),
@@ -126,6 +152,8 @@ class ConfigPage(ft.Container):
             updates['WECHAT_WEBHOOK_URL'] = self._wechat_field.value or ''
         if self._feishu_field:
             updates['FEISHU_WEBHOOK_URL'] = self._feishu_field.value or ''
+        if self._language_dropdown:
+            updates['LANGUAGE'] = self._language_dropdown.value or 'zh_CN'
 
         # Save to .env file
         config = get_config()
@@ -138,4 +166,12 @@ class ConfigPage(ft.Container):
         else:
             self.app.page.show_snack_bar(
                 ft.SnackBar(content=ft.Text("保存失败"), open=True)
+            )
+
+    def _on_language_change(self, e):
+        """Handle language change"""
+        if self._language_dropdown:
+            set_language(self._language_dropdown.value)
+            self.app.page.show_snack_bar(
+                ft.SnackBar(content=ft.Text(_("语言已切换")), open=True)
             )

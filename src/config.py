@@ -120,6 +120,9 @@ class Config:
     debug: bool = False
     http_proxy: Optional[str] = None  # HTTP 代理 (例如: http://127.0.0.1:10809)
     https_proxy: Optional[str] = None # HTTPS 代理
+
+    # === 语言配置 ===
+    language: str = "zh_CN"  # 语言偏好: zh_CN 或 en_US
     
     # === 定时任务配置 ===
     schedule_enabled: bool = False            # 是否启用定时任务
@@ -381,7 +384,8 @@ class Config:
             circuit_breaker_cooldown=int(os.getenv('CIRCUIT_BREAKER_COOLDOWN', '300')),
             # 行情异动提醒配置
             alerts_enabled=os.getenv('ALERTS_ENABLED', 'false').lower() == 'true',
-            alerts_threshold_pct=float(os.getenv('ALERTS_THRESHOLD_PCT', '5.0'))
+            alerts_threshold_pct=float(os.getenv('ALERTS_THRESHOLD_PCT', '5.0')),
+            language=os.getenv('LANGUAGE', 'zh_CN')
         )
     
     @classmethod
@@ -471,6 +475,8 @@ class Config:
             self.wechat_webhook_url = updates['WECHAT_WEBHOOK_URL']
         if 'FEISHU_WEBHOOK_URL' in updates:
             self.feishu_webhook_url = updates['FEISHU_WEBHOOK_URL']
+        if 'LANGUAGE' in updates:
+            self.language = updates['LANGUAGE']
 
     def is_first_time_setup(self) -> bool:
         """

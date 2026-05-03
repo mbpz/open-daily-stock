@@ -23,5 +23,11 @@ def _(key: str) -> str:
     """Translate a key"""
     return _translations.get(_current_lang, {}).get(key, key)
 
+def set_language(lang: str):
+    """Set current language"""
+    global _current_lang
+    if lang in _translations:
+        _current_lang = lang
+
 # Initialize on import
 init_i18n()
