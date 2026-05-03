@@ -466,7 +466,7 @@ class DatabaseManager:
     def _analyze_ma_status(self, data: StockDaily) -> str:
         """
         分析均线形态
-        
+
         判断条件：
         - 多头排列：close > ma5 > ma10 > ma20
         - 空头排列：close < ma5 < ma10 < ma20
@@ -476,7 +476,7 @@ class DatabaseManager:
         ma5 = data.ma5 or 0
         ma10 = data.ma10 or 0
         ma20 = data.ma20 or 0
-        
+
         if close > ma5 > ma10 > ma20 > 0:
             return "多头排列 📈"
         elif close < ma5 < ma10 < ma20 and ma20 > 0:
@@ -487,48 +487,6 @@ class DatabaseManager:
             return "短期走弱 🔽"
         else:
             return "震荡整理 ↔️"
-
-
-class AnalysisHistory(Base):
-    """
-    分析历史记录模型
-
-    存储历史分析任务的结果，支持回放功能
-    """
-    __tablename__ = 'analysis_history'
-
-    # 主键
-    id = Column(Integer, primary_key=True, autoincrement=True)
-
-    # 股票代码
-    code = Column(String(10), nullable=False, index=True)
-
-    # 时间戳
-    timestamp = Column(DateTime, default=datetime.now, index=True)
-
-    # 状态：pending/running/done/failed
-    status = Column(String(20), default="pending")
-
-    # 分析结果 JSON
-    result_json = Column(Text)
-
-    # 错误信息
-    error = Column(Text)
-
-    def __repr__(self):
-        return f"<AnalysisHistory(code={self.code}, status={self.status}, timestamp={self.timestamp})>"
-
-    def to_dict(self) -> Dict[str, Any]:
-        """转换为字典"""
-        return {
-            'id': self.id,
-            'code': self.code,
-            'timestamp': self.timestamp.isoformat() if self.timestamp else None,
-            'status': self.status,
-            'result_json': self.result_json,
-            'error': self.error,
-        }
-
 
     def save_analysis_history(
         self,
@@ -605,6 +563,47 @@ class AnalysisHistory(Base):
                 .limit(limit)
             ).scalars().all()
             return list(results)
+
+
+class AnalysisHistory(Base):
+    """
+    分析历史记录模型
+
+    存储历史分析任务的结果，支持回放功能
+    """
+    __tablename__ = 'analysis_history'
+
+    # 主键
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # 股票代码
+    code = Column(String(10), nullable=False, index=True)
+
+    # 时间戳
+    timestamp = Column(DateTime, default=datetime.now, index=True)
+
+    # 状态：pending/running/done/failed
+    status = Column(String(20), default="pending")
+
+    # 分析结果 JSON
+    result_json = Column(Text)
+
+    # 错误信息
+    error = Column(Text)
+
+    def __repr__(self):
+        return f"<AnalysisHistory(code={self.code}, status={self.status}, timestamp={self.timestamp})>"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        return {
+            'id': self.id,
+            'code': self.code,
+            'timestamp': self.timestamp.isoformat() if self.timestamp else None,
+            'status': self.status,
+            'result_json': self.result_json,
+            'error': self.error,
+        }
 
 
 # 便捷函数
