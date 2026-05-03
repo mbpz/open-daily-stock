@@ -11,6 +11,8 @@ class AnalyzePage(ft.Container):
         super().__init__()
         self.app = app
         self._pipeline = pipeline
+        self._progress_ring = None
+        self._status_text = None
 
         header = ft.Text("股票分析", size=24, weight=ft.FontWeight.BOLD)
 
@@ -18,6 +20,9 @@ class AnalyzePage(ft.Container):
             hint_text="如: 600519",
             width=200,
         )
+
+        self._progress_ring = ft.ProgressRing(width=30, height=30, visible=False)
+        self._status_text = ft.Text("", color="#a0a0a0", visible=False)
 
         input_row = ft.Row([
             ft.Text("股票代码:", width=100),
@@ -30,6 +35,8 @@ class AnalyzePage(ft.Container):
                 bgcolor=ACCENT_COLOR,
                 color=ft.Colors.WHITE,
             ),
+            self._progress_ring,
+            self._status_text,
         ])
 
         self._result_area = ft.Container(

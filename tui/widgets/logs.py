@@ -1,17 +1,20 @@
 """Logs module showing log output from existing log files."""
-import asyncio
-import re
 from pathlib import Path
-from textual.widgets import Static
-from datetime import datetime, timezone, timedelta
+from textual.widgets import Static, Input
+from textual.events import Key
+from datetime import datetime
+
 
 class LogsView(Static):
     """Display log entries with filtering."""
     def __init__(self):
         super().__init__()
         self._filter_level = "all"  # all/info/warning/error
+        self._search_query = ""
         self._entries: list = []
         self._log_dir = Path("logs")
+        self._result_count = 0
+        self._search_input: Input | None = None
 
     def load_logs(self):
         """Load recent log entries from logs/ directory."""
@@ -40,17 +43,25 @@ class LogsView(Static):
         self._filter_level = level
         self.refresh()
 
+    def set_search(self, query: str):
+        """Set search query and refresh"""
+        self._search_query = query.lower()
+        self.refresh()
+
     def render(self) -> str:
         self.load_logs()
-        lines = [f"  日志 (过滤: {self._filter_level})", "  " + "-" * 60]
+        lines = [f"  日志 (过滤: {self._filter_level})", f"  搜索: {self._search_query} | 结果: {self._result_count}", "  " + "-" * 60]
         if not self._entries:
             lines.append("  暂无日志")
             return "\n".join(lines)
+        self._result_count = 0
         for line in self._entries[-100:]:  # last 100 lines
-            if self._filter_level == "all":
-                lines.append(f"  {line}")
-            elif self._filter_level in line.lower():
-                lines.append(f"  {line}")
+            if self._filter_level != "all" and self._filter_level not in line.lower():
+                continue
+            if self._search_query and self._search_query not in line.lower():
+                continue
+            self._result_count += 1
+            lines.append(f"  {line}")
         return "\n".join(lines)
 
     def on_mount(self):

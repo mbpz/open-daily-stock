@@ -45,18 +45,21 @@ class StockAnalysisPipeline:
         self,
         config: Optional[Config] = None,
         max_workers: Optional[int] = None,
-        source_message: Optional[BotMessage] = None
+        source_message: Optional[BotMessage] = None,
+        progress_callback: Optional[callable] = None
     ):
         """
         初始化调度器
-        
+
         Args:
             config: 配置对象（可选，默认使用全局配置）
             max_workers: 最大并发线程数（可选，默认从配置读取）
+            progress_callback: 进度回调函数(stage, percent, message)
         """
         self.config = config or get_config()
         self.max_workers = max_workers or self.config.max_workers
         self.source_message = source_message
+        self._progress_callback = progress_callback
         
         # 初始化各模块
         self.db = get_db()
@@ -179,7 +182,9 @@ class StockAnalysisPipeline:
             # 如果还是没有名称，使用代码作为名称
             if not stock_name:
                 stock_name = f'股票{code}'
-            
+
+            self._report_progress("analysis_started", 40, f"正在分析 {code}...")
+
             # Step 2: 获取筹码分布 - 使用统一入口，带熔断保护
             chip_data = None
             try:
@@ -363,7 +368,15 @@ class StockAnalysisPipeline:
             return "明显放量"
         else:
             return "巨量"
-    
+
+    def _report_progress(self, stage: str, percent: int, message: str):
+        """报告进度回调"""
+        if self._progress_callback:
+            try:
+                self._progress_callback(stage, percent, message)
+            except Exception as e:
+                logger.warning(f"进度回调失败: {e}")
+
     def process_single_stock(
         self,
         code: str,
@@ -392,7 +405,9 @@ class StockAnalysisPipeline:
             AnalysisResult 或 None
         """
         logger.info(f"========== 开始处理 {code} ==========")
-        
+
+        self._report_progress("data_fetched", 20, f"正在获取 {code} 数据...")
+
         try:
             # Step 1: 获取并保存数据
             success, error = self.fetch_and_save_stock_data(code)
@@ -407,8 +422,9 @@ class StockAnalysisPipeline:
                 return None
             
             result = self.analyze_stock(code)
-            
+
             if result:
+                self._report_progress("analysis_completed", 70, f"{code} 分析完成")
                 logger.info(
                     f"[{code}] 分析完成: {result.operation_advice}, "
                     f"评分 {result.sentiment_score}"
@@ -547,6 +563,7 @@ class StockAnalysisPipeline:
         
         # 发送通知（单股推送模式下跳过汇总推送，避免重复）
         if results and send_notification and not dry_run:
+            self._report_progress("notification_sent", 90, "正在发送通知...")
             if single_stock_notify:
                 # 单股推送模式：只保存汇总报告，不再重复推送
                 logger.info("单股推送模式：跳过汇总推送，仅保存报告到本地")

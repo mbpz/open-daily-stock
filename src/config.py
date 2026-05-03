@@ -145,6 +145,10 @@ class Config:
     # Discord 机器人状态
     discord_bot_status: str = "A股智能分析 | /help"
 
+    # === 行情异动提醒配置 ===
+    alerts_enabled: bool = False                  # 是否启用异动提醒
+    alerts_threshold_pct: float = 5.0             # 异动阈值百分比
+
     # === 流控配置（防封禁关键参数）===
     # Akshare 请求间隔范围（秒）
     akshare_sleep_min: float = 2.0
@@ -374,7 +378,10 @@ class Config:
             # - efinance/akshare_em: 全量拉取，数据丰富但负载大
             realtime_source_priority=os.getenv('REALTIME_SOURCE_PRIORITY', 'akshare_sina,tencent,efinance,akshare_em'),
             realtime_cache_ttl=int(os.getenv('REALTIME_CACHE_TTL', '600')),
-            circuit_breaker_cooldown=int(os.getenv('CIRCUIT_BREAKER_COOLDOWN', '300'))
+            circuit_breaker_cooldown=int(os.getenv('CIRCUIT_BREAKER_COOLDOWN', '300')),
+            # 行情异动提醒配置
+            alerts_enabled=os.getenv('ALERTS_ENABLED', 'false').lower() == 'true',
+            alerts_threshold_pct=float(os.getenv('ALERTS_THRESHOLD_PCT', '5.0'))
         )
     
     @classmethod

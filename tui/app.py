@@ -3,8 +3,7 @@ import asyncio
 from textual.app import App
 from textual.binding import Binding
 from textual.timer import Timer
-from tui.widgets.header import Header
-from tui.widgets.footer import Footer
+from textual.widget import Static
 from tui.widgets.nav import Nav
 from tui.widgets.markets import MarketsView
 from tui.widgets.tasks import TasksView
@@ -18,6 +17,29 @@ from src.service_client import ServiceClient
 from typing import Optional
 
 MODULES = [MarketsView, TasksView, AnalyzeView, ConfigView, LogsView]
+
+
+class HelpPanel(Static):
+    """帮助面板"""
+    def __init__(self, on_close):
+        self._on_close = on_close
+        content = """
+        TUI 快捷键
+        ─────────────
+        1-5     切换模块
+        Tab     下一个模块
+        r       刷新行情
+        ?       显示帮助
+        q       退出
+
+        按 ? 或 Escape 关闭
+        """
+        super().__init__(content=content)
+        self.display = False
+
+    def on_key(self, event):
+        if event.key == "?" or event.key == "escape":
+            self._on_close()
 
 
 def _make_analyze_callback(app: 'TUIApp'):
@@ -62,6 +84,7 @@ class TUIApp(App):
         self._show_wizard = config.is_first_time_setup()
         self._wizard_completed = False
         self._wizard_skipped = False
+        self._help_visible = False
 
     def compose(self):
         if self._show_wizard and not self._wizard_completed:
@@ -85,6 +108,7 @@ class TUIApp(App):
         yield AnalyzeView(self._on_analyze_callback)
         yield ConfigView()
         yield LogsView()
+        yield HelpPanel(self._close_help)
 
     def on_mount(self):
         if self._show_wizard and not self._wizard_completed:
@@ -139,3 +163,14 @@ class TUIApp(App):
             except Exception:
                 pass
         self._refresh_task = asyncio.create_task(refresh())
+
+    def action_help(self):
+        self._toggle_help()
+
+    def _toggle_help(self):
+        self._help_visible = not self._help_visible
+        self.query_one(HelpPanel).display = self._help_visible
+
+    def _close_help(self):
+        self._help_visible = False
+        self.query_one(HelpPanel).display = False
