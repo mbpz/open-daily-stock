@@ -2,6 +2,7 @@
 import flet as ft
 import json
 from gui.theme import CARD_BG, CARD_BORDER, TEXT_SECONDARY, SUCCESS_COLOR, WARNING_COLOR, ERROR_COLOR, DONE_BG
+from src.i18n import _
 from src.storage import get_db
 
 # Status icons
@@ -29,7 +30,7 @@ class TasksPage(ft.Container):
         self.task_store = task_store
         self._db = get_db()
 
-        header = ft.Text("历史任务", size=24, weight=ft.FontWeight.BOLD)
+        header = ft.Text(_("历史任务"), size=24, weight=ft.FontWeight.BOLD)
 
         self.task_list = ft.ListView(
             expand=True,
@@ -165,32 +166,32 @@ class TasksPage(ft.Container):
 
         # Build detail content
         detail_content = ft.Column([
-            ft.Text(f"股票代码: {record.code}", weight=ft.FontWeight.BOLD, size=18),
-            ft.Text(f"时间: {record.timestamp.strftime('%Y-%m-%d %H:%M') if record.timestamp else 'N/A'}", size=14),
+            ft.Text(f"{_('股票代码: ')}{record.code}", weight=ft.FontWeight.BOLD, size=18),
+            ft.Text(f"{_('时间: ')}{record.timestamp.strftime('%Y-%m-%d %H:%M') if record.timestamp else 'N/A'}", size=14),
             ft.Divider(),
-            ft.Text(f"综合评分: {result_data.get('sentiment_score', 'N/A')}", size=16),
-            ft.Text(f"趋势预测: {result_data.get('trend_prediction', 'N/A')}", size=16),
-            ft.Text(f"操作建议: {result_data.get('operation_advice', 'N/A')}", size=16),
-            ft.Text(f"置信度: {result_data.get('confidence_level', 'N/A')}", size=16),
+            ft.Text(f"{_('综合评分:')}{result_data.get('sentiment_score', 'N/A')}", size=16),
+            ft.Text(f"{_('趋势预测:')}{result_data.get('trend_prediction', 'N/A')}", size=16),
+            ft.Text(f"{_('操作建议:')}{result_data.get('operation_advice', 'N/A')}", size=16),
+            ft.Text(f"{_('置信度:')}{result_data.get('confidence_level', 'N/A')}", size=16),
             ft.Divider(),
-            ft.Text("走势分析:", weight=ft.FontWeight.BOLD),
-            ft.Text(result_data.get('trend_analysis', 'N/A') or '无'),
+            ft.Text(_("走势分析:"), weight=ft.FontWeight.BOLD),
+            ft.Text(result_data.get('trend_analysis', 'N/A') or 'N/A'),
             ft.Divider(),
-            ft.Text("短期展望:", weight=ft.FontWeight.BOLD),
-            ft.Text(result_data.get('short_term_outlook', 'N/A') or '无'),
+            ft.Text(_("短期展望:"), weight=ft.FontWeight.BOLD),
+            ft.Text(result_data.get('short_term_outlook', 'N/A') or 'N/A'),
             ft.Divider(),
-            ft.Text("支撑位/压力位:", weight=ft.FontWeight.BOLD),
-            ft.Text(result_data.get('support_resistance', 'N/A') or '无'),
+            ft.Text(_("支撑位/压力位:"), weight=ft.FontWeight.BOLD),
+            ft.Text(result_data.get('support_resistance', 'N/A') or 'N/A'),
             ft.Divider(),
-            ft.Text("风险提示:", weight=ft.FontWeight.BOLD),
-            ft.Text(result_data.get('risk_alert', 'N/A') or '无'),
+            ft.Text(_("风险提示:"), weight=ft.FontWeight.BOLD),
+            ft.Text(result_data.get('risk_alert', 'N/A') or 'N/A'),
         ], scroll=ft.ScrollMode.AUTO)
 
         dialog = ft.AlertDialog(
-            title=ft.Text(f"分析详情 - {record.code}"),
+            title=ft.Text(f"{_('分析详情 - ')}{record.code}"),
             content=detail_content,
             actions=[
-                ft.TextButton("关闭", on_click=lambda e: self._close_dialog())
+                ft.TextButton(_("关闭"), on_click=lambda e: self._close_dialog())
             ],
             actions_alignment=ft.MainAxisAlignment.END,
         )

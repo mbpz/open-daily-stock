@@ -20,7 +20,7 @@ class ConfigPage(ft.Container):
         self._feishu_field = None
         self._language_dropdown = None
 
-        header = ft.Text("配置管理", size=24, weight=ft.FontWeight.BOLD)
+        header = ft.Text(_("配置管理"), size=24, weight=ft.FontWeight.BOLD)
 
         # Load current config values
         config = get_config()
@@ -28,19 +28,19 @@ class ConfigPage(ft.Container):
         # Pre-populate stock_list as comma-separated string
         stock_value = ','.join(config.stock_list) if config.stock_list else ''
 
-        api_section = self._build_section("API 配置", [
-            ("OpenAI API Key:", config.openai_api_key or ""),
-            ("API 地址:", config.openai_base_url or "https://api.minimax.chat/v1"),
-            ("模型名称:", config.openai_model or "abab6-chat"),
+        api_section = self._build_section(_("API 配置"), [
+            (_("OpenAI API Key:"), config.openai_api_key or ""),
+            (_("API 地址:"), config.openai_base_url or "https://api.minimax.chat/v1"),
+            (_("模型名称:"), config.openai_model or "abab6-chat"),
         ])
 
-        stock_section = self._build_section("自选股配置", [
-            ("股票列表:", stock_value),
+        stock_section = self._build_section(_("自选股配置"), [
+            (_("股票列表:"), stock_value),
         ])
 
-        notify_section = self._build_section("通知配置", [
-            ("企业微信:", config.wechat_webhook_url or ""),
-            ("飞书:", config.feishu_webhook_url or ""),
+        notify_section = self._build_section(_("通知配置"), [
+            (_("企业微信:"), config.wechat_webhook_url or ""),
+            (_("飞书:"), config.feishu_webhook_url or ""),
         ])
 
         # Language section
@@ -66,7 +66,7 @@ class ConfigPage(ft.Container):
         )
 
         save_btn = ft.Button(
-            "保存配置",
+            _("保存配置"),
             icon=ft.Icons.SAVE,
             on_click=self._save_config,
             bgcolor=ACCENT_COLOR,
@@ -111,17 +111,17 @@ class ConfigPage(ft.Container):
                 ])
             )
             # Store references to specific fields
-            if label == "OpenAI API Key:":
+            if label == _("OpenAI API Key:"):
                 self._api_key_field = text_field
-            elif label == "API 地址:":
+            elif label == _("API 地址:"):
                 self._base_url_field = text_field
-            elif label == "模型名称:":
+            elif label == _("模型名称:"):
                 self._model_field = text_field
-            elif label == "股票列表:":
+            elif label == _("股票列表:"):
                 self._stock_list_field = text_field
-            elif label == "企业微信:":
+            elif label == _("企业微信:"):
                 self._wechat_field = text_field
-            elif label == "飞书:":
+            elif label == _("飞书:"):
                 self._feishu_field = text_field
 
         return ft.Container(
@@ -161,11 +161,11 @@ class ConfigPage(ft.Container):
 
         if success:
             self.app.page.show_snack_bar(
-                ft.SnackBar(content=ft.Text("配置已保存"), open=True)
+                ft.SnackBar(content=ft.Text(_("配置已保存")), open=True)
             )
         else:
             self.app.page.show_snack_bar(
-                ft.SnackBar(content=ft.Text("保存失败"), open=True)
+                ft.SnackBar(content=ft.Text(_("保存失败")), open=True)
             )
 
     def _on_language_change(self, e):

@@ -2,6 +2,7 @@
 import flet as ft
 from pathlib import Path
 from gui.theme import CARD_BG, CARD_BORDER, TEXT_SECONDARY
+from src.i18n import _
 
 class LogsPage(ft.Container):
     """日志查看页面"""
@@ -10,13 +11,13 @@ class LogsPage(ft.Container):
         super().__init__()
         self.app = app
 
-        header = ft.Text("运行日志", size=24, weight=ft.FontWeight.BOLD)
+        header = ft.Text(_("运行日志"), size=24, weight=ft.FontWeight.BOLD)
 
         toolbar = ft.Row([
             ft.IconButton(
                 icon=ft.Icons.REFRESH,
                 on_click=self._load_logs,
-                tooltip="刷新",
+                tooltip=_("刷新"),
             ),
         ])
 
@@ -24,7 +25,7 @@ class LogsPage(ft.Container):
             expand=True,
             spacing=10,
         )
-        self._log_text = ft.Text("加载中...", color=TEXT_SECONDARY)
+        self._log_text = ft.Text(_("加载中..."), color=TEXT_SECONDARY)
         self._log_content.controls.append(self._log_text)
 
         self._load_logs(None)
@@ -63,13 +64,13 @@ class LogsPage(ft.Container):
                     self._log_text.font_family = "monospace"
                     self._log_text.color = TEXT_SECONDARY
                 else:
-                    self._log_text.value = "暂无日志"
+                    self._log_text.value = _("暂无日志")
                     self._log_text.color = TEXT_SECONDARY
             else:
-                self._log_text.value = "日志目录不存在"
+                self._log_text.value = _("日志目录不存在")
                 self._log_text.color = TEXT_SECONDARY
         except Exception as ex:
-            self._log_text.value = f"加载失败: {ex}"
+            self._log_text.value = f"{_('加载失败: ')}{ex}"
             self._log_text.color = "#f44336"
         try:
             self._log_content.update()

@@ -2,6 +2,7 @@
 import flet as ft
 from datetime import datetime
 from gui.theme import SUCCESS_COLOR, ERROR_COLOR, TEXT_SECONDARY, CARD_BG, CARD_BORDER
+from src.i18n import _
 
 
 class MarketsPage(ft.Container):
@@ -14,23 +15,23 @@ class MarketsPage(ft.Container):
 
         # 标题栏
         header = ft.Row([
-            ft.Text("自选股行情", size=24, weight=ft.FontWeight.BOLD),
+            ft.Text(_("自选股行情"), size=24, weight=ft.FontWeight.BOLD),
             ft.Container(expand=True),
             ft.IconButton(
                 icon=ft.Icons.REFRESH,
                 on_click=self._refresh,
-                tooltip="刷新",
+                tooltip=_("刷新"),
             ),
         ])
 
         # 行情表格 - 初始显示加载占位
         self.table = ft.DataTable(
             columns=[
-                ft.DataColumn(ft.Text("代码", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("名称", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("最新价", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("涨跌幅", weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("成交量", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text(_("代码"), weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text(_("名称"), weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text(_("最新价"), weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text(_("涨跌幅"), weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text(_("成交量"), weight=ft.FontWeight.BOLD)),
             ],
             rows=[],
         )
@@ -60,7 +61,7 @@ class MarketsPage(ft.Container):
         self.table.rows.clear()
         self.table.rows.append(
             ft.DataRow(cells=[
-                ft.DataCell(ft.Text("点击刷新获取数据", color=TEXT_SECONDARY)),
+                ft.DataCell(ft.Text(_("点击刷新获取数据"), color=TEXT_SECONDARY)),
                 ft.DataCell(ft.Text("")),
                 ft.DataCell(ft.Text("")),
                 ft.DataCell(ft.Text("")),
