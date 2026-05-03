@@ -6,6 +6,10 @@ from pathlib import Path
 # 设置测试环境变量
 os.environ["TESTING"] = "true"
 
+# 设置默认语言为中文（测试期望中文界面）
+from src.i18n import set_language
+set_language("zh_CN")
+
 @pytest.fixture
 def test_env_file(tmp_path):
     """创建临时测试 .env 文件"""
