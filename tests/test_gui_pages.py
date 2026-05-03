@@ -64,11 +64,15 @@ class TestMarketsPage:
     def test_markets_page_with_data(self, mock_app, mock_data_provider_with_data):
         """test_markets_page_with_data - MarketsPage displays data"""
         from gui.pages.markets import MarketsPage
+        markets = [
+            {'code': '600519', 'name': '贵州茅台', 'price': 1690.0, 'change': 0.6, 'volume': '1000万'},
+            {'code': '000001', 'name': '平安银行', 'price': 12.5, 'change': 0.85, 'volume': '1500万'},
+        ]
         page = MarketsPage(mock_app, mock_data_provider_with_data)
         # Content is built in __init__
         page.content
         # Manually load data to test _load_data
-        page._load_data()
+        page._load_data(markets)
         # Should have rows
         assert len(page.table.rows) == 2
 
