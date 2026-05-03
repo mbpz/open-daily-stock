@@ -5,13 +5,14 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from tui.data.task_store import TaskStore, TaskStatus
 from src.storage import get_db
+from src.i18n import _
 
 class TasksView(Static):
     """Tasks widget showing historical analysis tasks."""
 
     BINDINGS = [
-        Binding("enter", "show_detail", "查看详情", show=True),
-        Binding("r", "refresh", "刷新", show=True),
+        Binding("enter", "show_detail", _("查看详情"), show=True),
+        Binding("r", "refresh", _("刷新"), show=True),
     ]
 
     def __init__(self, task_store: TaskStore):
@@ -27,7 +28,7 @@ class TasksView(Static):
 
     def _render_tasks(self) -> str:
         """Render the tasks list."""
-        lines = ["  历史任务 (按 Enter 查看详情)", "  " + "-" * 60]
+        lines = [_("  历史任务 (按 Enter 查看详情)"), "  " + "-" * 60]
 
         # Load from database
         try:
@@ -39,7 +40,7 @@ class TasksView(Static):
             # Fallback to task_store
             tasks = self._store.get_tasks()
             if not tasks:
-                lines.append("  暂无任务记录")
+                lines.append(_("  暂无任务记录"))
                 return "\n".join(lines)
             for i, t in enumerate(tasks):
                 marker = " >" if i == self._selected_index else "  "
@@ -64,7 +65,7 @@ class TasksView(Static):
                         pass
 
         lines.append("")
-        lines.append("  操作: ↑↓ 选择, Enter 查看详情, R 刷新")
+        lines.append(_("  操作: ↑↓ 选择, Enter 查看详情, R 刷新"))
         return "\n".join(lines)
 
     def watch_tasks(self) -> None:
@@ -99,30 +100,30 @@ class TasksView(Static):
         detail_lines = [
             "",
             "=" * 60,
-            f"  分析详情 - {task.code}",
+            f"  {_('分析详情 - ')}{task.code}",
             "=" * 60,
-            f"  时间: {task.timestamp.strftime('%Y-%m-%d %H:%M') if task.timestamp else 'N/A'}",
-            f"  状态: {task.status}",
+            f"  {_('时间: ')}{task.timestamp.strftime('%Y-%m-%d %H:%M') if task.timestamp else 'N/A'}",
+            f"  {_('状态: ')}{task.status}",
             "-" * 60,
-            f"  综合评分: {result_data.get('sentiment_score', 'N/A')}",
-            f"  趋势预测: {result_data.get('trend_prediction', 'N/A')}",
-            f"  操作建议: {result_data.get('operation_advice', 'N/A')}",
-            f"  置信度: {result_data.get('confidence_level', 'N/A')}",
+            f"  {_('综合评分: ')}{result_data.get('sentiment_score', 'N/A')}",
+            f"  {_('趋势预测: ')}{result_data.get('trend_prediction', 'N/A')}",
+            f"  {_('操作建议: ')}{result_data.get('operation_advice', 'N/A')}",
+            f"  {_('置信度: ')}{result_data.get('confidence_level', 'N/A')}",
             "-" * 60,
-            f"  走势分析:",
-            f"  {result_data.get('trend_analysis', 'N/A') or '无'}",
+            f"  {_('走势分析:')}",
+            f"  {result_data.get('trend_analysis', 'N/A') or 'N/A'}",
             "-" * 60,
-            f"  短期展望:",
-            f"  {result_data.get('short_term_outlook', 'N/A') or '无'}",
+            f"  {_('短期展望:')}",
+            f"  {result_data.get('short_term_outlook', 'N/A') or 'N/A'}",
             "-" * 60,
-            f"  支撑位/压力位:",
-            f"  {result_data.get('support_resistance', 'N/A') or '无'}",
+            f"  {_('支撑位/压力位:')}",
+            f"  {result_data.get('support_resistance', 'N/A') or 'N/A'}",
             "-" * 60,
-            f"  风险提示:",
-            f"  {result_data.get('risk_alert', 'N/A') or '无'}",
+            f"  {_('风险提示:')}",
+            f"  {result_data.get('risk_alert', 'N/A') or 'N/A'}",
             "=" * 60,
             "",
-            "  按 Esc 关闭",
+            f"  {_('按 Esc 关闭')}",
         ]
 
         detail_text = "\n".join(detail_lines)

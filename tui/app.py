@@ -14,6 +14,7 @@ from tui.data.wrapper import DataProviderWrapper
 from tui.data.task_store import TaskStore
 from src.config import get_config
 from src.service_client import ServiceClient
+from src.i18n import _
 from typing import Optional
 
 MODULES = [MarketsView, TasksView, AnalyzeView, ConfigView, LogsView]
@@ -23,16 +24,16 @@ class HelpPanel(Static):
     """帮助面板"""
     def __init__(self, on_close):
         self._on_close = on_close
-        content = """
-        TUI 快捷键
-        ─────────────
-        1-5     切换模块
-        Tab     下一个模块
-        r       刷新行情
-        ?       显示帮助
-        q       退出
+        content = f"""
+        {_('TUI 快捷键')}
+        {_('─────────────')}
+        {_('1-5     切换模块')}
+        {_('Tab     下一个模块')}
+        {_('r       刷新行情')}
+        {_('?       显示帮助')}
+        {_('q       退出')}
 
-        按 ? 或 Escape 关闭
+        {_('按 ? 或 Escape 关闭')}
         """
         super().__init__(content=content)
         self.display = False
@@ -58,15 +59,15 @@ def _make_analyze_callback(app: 'TUIApp'):
 
 class TUIApp(App):
     BINDINGS = [
-        Binding("q", "quit", "退出"),
+        Binding("q", "quit", _("退出")),
         Binding("1", "switch(0)", ""),
         Binding("2", "switch(1)", ""),
         Binding("3", "switch(2)", ""),
         Binding("4", "switch(3)", ""),
         Binding("5", "switch(4)", ""),
         Binding("tab", "next_module", ""),
-        Binding("r", "refresh", "刷新"),
-        Binding("?", "help", "帮助"),
+        Binding("r", "refresh", _("刷新")),
+        Binding("?", "help", _("帮助")),
     ]
     CSS = """
     Screen { background: #1a1a2e; }
@@ -187,8 +188,8 @@ class TUIApp(App):
             pipeline = StockAnalysisPipeline(progress_callback=progress_callback)
             result = await asyncio.to_thread(pipeline.process_single_stock, stock_code)
             if result:
-                progress_callback("analysis_completed", 100, "分析完成")
+                progress_callback("analysis_completed", 100, _("分析完成"))
             else:
-                progress_callback("analysis_failed", 100, "分析失败")
+                progress_callback("analysis_failed", 100, _("分析失败"))
         except Exception as e:
-            progress_callback("analysis_error", 100, f"错误: {e}")
+            progress_callback("analysis_error", 100, f"{_('错误: ')}{e}")

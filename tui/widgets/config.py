@@ -2,6 +2,7 @@
 from textual.widgets import Static, Input, Button
 from textual.events import Key
 from src.config import get_config
+from src.i18n import _
 
 
 class ConfigView(Static):
@@ -12,13 +13,13 @@ class ConfigView(Static):
         self._config = get_config()
         self._selected_idx = 0
         self._fields = [
-            {"key": "STOCK_LIST", "label": "自选股列表", "value": "", "hint": "逗号分隔，如: 000001,600519"},
-            {"key": "OPENAI_API_KEY", "label": "OpenAI API Key", "value": "", "hint": "MiniMax/OpenAI 兼容 Key"},
-            {"key": "OPENAI_BASE_URL", "label": "API 地址", "value": "", "hint": "MiniMax: https://api.minimax.chat/v1"},
-            {"key": "OPENAI_MODEL", "label": "模型名称", "value": "", "hint": "如: gpt-4o-mini 或 abab6-chat"},
-            {"key": "GEMINI_API_KEY", "label": "Gemini API Key", "value": "", "hint": "Google Gemini API Key"},
-            {"key": "WECHAT_WEBHOOK_URL", "label": "企业微信 Webhook", "value": "", "hint": "企业微信群机器人 URL"},
-            {"key": "FEISHU_WEBHOOK_URL", "label": "飞书 Webhook", "value": "", "hint": "飞书群机器人 URL"},
+            {"key": "STOCK_LIST", "label": _("自选股列表"), "value": "", "hint": _("逗号分隔，如: 000001,600519")},
+            {"key": "OPENAI_API_KEY", "label": _("OpenAI API Key"), "value": "", "hint": _("MiniMax/OpenAI 兼容 Key")},
+            {"key": "OPENAI_BASE_URL", "label": _("API 地址"), "value": "", "hint": "MiniMax: https://api.minimax.chat/v1"},
+            {"key": "OPENAI_MODEL", "label": _("模型名称"), "value": "", "hint": _("如: gpt-4o-mini 或 abab6-chat")},
+            {"key": "GEMINI_API_KEY", "label": "Google Gemini API Key", "value": "", "hint": "Google Gemini API Key"},
+            {"key": "WECHAT_WEBHOOK_URL", "label": _("企业微信 Webhook"), "value": "", "hint": _("企业微信群机器人 URL")},
+            {"key": "FEISHU_WEBHOOK_URL", "label": _("飞书 Webhook"), "value": "", "hint": _("飞书群机器人 URL")},
         ]
         self._load_values()
 
@@ -34,23 +35,23 @@ class ConfigView(Static):
 
     def compose(self):
         yield Static("=" * 50, id="header")
-        yield Static("  配置管理  (↑↓ 选择，Enter 编辑，Esc 完成)", id="nav-hint")
+        yield Static(_("  配置管理  (↑↓ 选择，Enter 编辑，Esc 完成)"), id="nav-hint")
         yield Static("=" * 50, id="divider")
 
         for i, field in enumerate(self._fields):
             marker = "►" if i == self._selected_idx else " "
-            yield Static(f"{marker} {field['label']}: {field['value'] or '(未配置)'}", id=f"field-{i}")
+            yield Static(f"{marker} {field['label']}: {field['value'] or _('(未配置)')}", id=f"field-{i}")
 
         yield Static("", id="hint-line")
         yield Static("", id="input-area")
         yield Static("", id="save-status")
-        yield Static("  ↑↓ 选择  Enter 编辑  Esc 保存并退出", id="footer-hint")
+        yield Static(_("  ↑↓ 选择  Enter 编辑  Esc 保存并退出"), id="footer-hint")
 
     def _refresh_display(self):
         """刷新显示"""
         for i, field in enumerate(self._fields):
             marker = "►" if i == self._selected_idx else " "
-            display_value = field['value'] or '(未配置)'
+            display_value = field['value'] or _('(未配置)')
             el = self.query_one(f"#field-{i}", Static)
             el.update(f"{marker} {field['label']}: {display_value}")
 
@@ -122,8 +123,8 @@ class ConfigView(Static):
 
         if updates:
             success = self._config.save_to_env(updates)
-            status = "✓ 配置已保存到 .env" if success else "✗ 保存失败"
+            status = _("✓ 配置已保存到 .env") if success else _("✗ 保存失败")
         else:
-            status = "✓ 无需保存"
+            status = _("✓ 无需保存")
 
         self.query_one("#save-status", Static).update(f"  {status}")

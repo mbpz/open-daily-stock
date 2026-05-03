@@ -3,6 +3,7 @@ from pathlib import Path
 from textual.widgets import Static, Input
 from textual.events import Key
 from datetime import datetime
+from src.i18n import _
 
 
 class LogsView(Static):
@@ -51,8 +52,8 @@ class LogsView(Static):
 
     def compose(self):
         """Compose search input and log display."""
-        yield Static("  [1]全部 [2]INFO [3]WARNING [4]ERROR  |  搜索:", id="filter-hint")
-        yield Input(placeholder="输入搜索关键词...", id="log-search")
+        yield Static(_("[1]全部 [2]INFO [3]WARNING [4]ERROR  |  搜索:"), id="filter-hint")
+        yield Input(placeholder=_("输入搜索关键词..."), id="log-search")
         yield Static("", id="log-content")
 
     def on_mount(self):
@@ -85,9 +86,9 @@ class LogsView(Static):
     def _update_display(self):
         """Update the log content display."""
         self.load_logs()
-        lines = [f"  日志 (过滤: {self._filter_level})", f"  搜索: {self._search_query} | 结果: {self._result_count}", "  " + "-" * 60]
+        lines = [_(f"  日志 (过滤: {self._filter_level})"), f"  {_('搜索: ')}{self._search_query} | {_('结果: ')}{self._result_count}", "  " + "-" * 60]
         if not self._entries:
-            lines.append("  暂无日志")
+            lines.append(_("  暂无日志"))
             self._content_display.update("\n".join(lines))
             return
         self._result_count = 0

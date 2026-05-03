@@ -2,6 +2,7 @@
 from textual.widgets import Static, Input
 from textual.events import Key
 from src.config import get_config
+from src.i18n import _
 
 
 class WizardView(Static):
@@ -9,24 +10,24 @@ class WizardView(Static):
 
     WIZARD_STEPS = [
         {
-            "title": "配置 API Key",
+            "title": _("步骤 1/3: 配置 API Key"),
             "fields": [
-                {"key": "OPENAI_API_KEY", "label": "OpenAI/MiniMax API Key", "hint": "输入你的 API Key（如 MiniMax eyJ...）", "required": True},
-                {"key": "OPENAI_BASE_URL", "label": "API 地址", "hint": "MiniMax: https://api.minimax.chat/v1", "required": False},
-                {"key": "OPENAI_MODEL", "label": "模型名称", "hint": "如: abab6-chat 或 gpt-4o-mini", "required": False},
+                {"key": "OPENAI_API_KEY", "label": _("OpenAI/MiniMax API Key"), "hint": _("输入你的 API Key（如 MiniMax eyJ...）"), "required": True},
+                {"key": "OPENAI_BASE_URL", "label": _("API 地址"), "hint": "MiniMax: https://api.minimax.chat/v1", "required": False},
+                {"key": "OPENAI_MODEL", "label": _("模型名称"), "hint": _("如: abab6-chat 或 gpt-4o-mini"), "required": False},
             ]
         },
         {
-            "title": "配置自选股",
+            "title": _("步骤 2/3: 配置自选股"),
             "fields": [
-                {"key": "STOCK_LIST", "label": "自选股列表", "hint": "逗号分隔，如: 000001,600519,000002", "required": True},
+                {"key": "STOCK_LIST", "label": _("自选股列表"), "hint": _("逗号分隔，如: 000001,600519,000002"), "required": True},
             ]
         },
         {
-            "title": "配置通知渠道（可选）",
+            "title": _("步骤 3/3: 配置通知渠道（可选）"),
             "fields": [
-                {"key": "WECHAT_WEBHOOK_URL", "label": "企业微信 Webhook", "hint": "企业微信群机器人 URL（可选）", "required": False},
-                {"key": "FEISHU_WEBHOOK_URL", "label": "飞书 Webhook", "hint": "飞书群机器人 URL（可选）", "required": False},
+                {"key": "WECHAT_WEBHOOK_URL", "label": _("企业微信 Webhook"), "hint": _("企业微信群机器人 URL（可选）"), "required": False},
+                {"key": "FEISHU_WEBHOOK_URL", "label": _("飞书 Webhook"), "hint": _("飞书群机器人 URL（可选）"), "required": False},
             ],
             "skippable": True,
         },
@@ -44,13 +45,13 @@ class WizardView(Static):
     def compose(self):
         step = self.WIZARD_STEPS[self._current_step]
         yield Static("=" * 50, id="wizard-header")
-        yield Static(f"  欢迎使用 open-daily-stock", id="wizard-title")
-        yield Static(f"  首次启动需要完成以下配置", id="wizard-subtitle")
+        yield Static(f"  {_('欢迎使用 open-daily-stock')}", id="wizard-title")
+        yield Static(f"  {_('首次启动需要完成以下配置')}", id="wizard-subtitle")
         yield Static("=" * 50, id="wizard-divider")
         yield Static("", id="wizard-spacer")
 
         # 步骤标题
-        yield Static(f"步骤 {self._current_step + 1}/{len(self.WIZARD_STEPS)}: {step['title']}", id="step-title")
+        yield Static(f"{_('步骤 {}: ').format(self._current_step + 1)}{step['title']}", id="step-title")
 
         # 字段列表
         for i, field in enumerate(step["fields"]):
@@ -65,7 +66,7 @@ class WizardView(Static):
 
         # 底部提示
         skip_hint = " | Esc 跳过" if step.get("skippable") else ""
-        yield Static(f"  ↑↓ 选择  Enter 编辑  Enter 继续{skip_hint}", id="wizard-footer")
+        yield Static(f"  {_('↑↓ 选择  Enter 编辑  Enter 继续')}{skip_hint}", id="wizard-footer")
 
     def on_mount(self):
         self.styles.background = "#1a1a2e"
@@ -110,7 +111,7 @@ class WizardView(Static):
 
         skip_hint = " | Esc 跳过" if step.get("skippable") else ""
         self.query_one("#wizard-footer", Static).update(
-            f"  ↑↓ 选择  Enter 编辑  Enter 继续{skip_hint}"
+            f"  {_('↑↓ 选择  Enter 编辑  Enter 继续')}{skip_hint}"
         )
 
     def _edit_field(self, field: dict):
