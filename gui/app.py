@@ -41,6 +41,10 @@ class StockApp:
             destinations=[
                 ft.NavigationRailDestination(
                     icon=ft.Icons.SHOW_CHART,
+                    label="K线"
+                ),
+                ft.NavigationRailDestination(
+                    icon=ft.Icons.CANDLESTICK_CHART,
                     label="行情"
                 ),
                 ft.NavigationRailDestination(
@@ -102,13 +106,14 @@ class StockApp:
 
     def _on_nav_change(self, e):
         """Handle navigation rail selection change"""
-        page_names = ["markets", "analyze", "tasks", "config", "logs"]
+        page_names = ["chart", "markets", "analyze", "tasks", "config", "logs"]
         self.nav_index = e.control.selected_index
         self._load_page(page_names[self.nav_index])
 
     def _load_page(self, page_name: str):
         """Load and display the specified page"""
         page_map = {
+            "chart": "gui.pages.chart",
             "markets": "gui.pages.markets",
             "analyze": "gui.pages.analyze",
             "tasks": "gui.pages.tasks",
@@ -116,6 +121,7 @@ class StockApp:
             "logs": "gui.pages.logs",
         }
         class_map = {
+            "chart": "ChartPage",
             "markets": "MarketsPage",
             "analyze": "AnalyzePage",
             "tasks": "TasksPage",
@@ -135,7 +141,9 @@ class StockApp:
             module = __import__(page_map[page_name], fromlist=[class_map[page_name]])
             page_class = getattr(module, class_map[page_name])
             # Pass data provider to pages that need it
-            if page_name == "markets":
+            if page_name == "chart":
+                self.content_area.content = page_class(self, self._client)
+            elif page_name == "markets":
                 self.content_area.content = page_class(self, self._client)
             elif page_name == "analyze":
                 self.content_area.content = page_class(self, self._pipeline)

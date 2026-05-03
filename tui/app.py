@@ -3,7 +3,7 @@ import asyncio
 from textual.app import App
 from textual.binding import Binding
 from textual.timer import Timer
-from textual.widget import Static
+from textual.widgets import Static
 from tui.widgets.nav import Nav
 from tui.widgets.markets import MarketsView
 from tui.widgets.tasks import TasksView
