@@ -7,28 +7,6 @@ from typing import Dict, Any, List
 
 from .config import get_config
 
-
-def _check_alerts(self):
-    """检查行情异动"""
-    config = get_config()
-    if not config.alerts_enabled:
-        return
-
-    threshold = config.alerts_threshold_pct
-
-    for market in self._get_markets():
-        if abs(market.get("change_pct", 0)) > threshold:
-            self._send_alert(market)
-
-
-def _send_alert(self, market):
-    """发送异动通知"""
-    from src.notification import NotificationService
-    notifier = NotificationService()
-    message = f"\U0001f6a8 {market['code']} 异动: {market['change_pct']:+.2f}% (价格: {market['price']})"
-    notifier.send(message)
-
-
 class DataService:
     def __init__(self):
         self._running = True
@@ -121,6 +99,25 @@ class DataService:
               market["change_pct"], market["volume"], datetime.now().isoformat()))
         conn.commit()
         conn.close()
+
+    def _check_alerts(self):
+        """检查行情异动"""
+        config = get_config()
+        if not config.alerts_enabled:
+            return
+
+        threshold = config.alerts_threshold_pct
+
+        for market in self._get_markets():
+            if abs(market.get("change_pct", 0)) > threshold:
+                self._send_alert(market)
+
+    def _send_alert(self, market):
+        """发送异动通知"""
+        from src.notification import NotificationService
+        notifier = NotificationService()
+        message = f"\U0001f6a8 {market['code']} 异动: {market['change_pct']:+.2f}% (价格: {market['price']})"
+        notifier.send(message)
 
     def run(self):
         """主循环：读取 stdin，处理请求"""

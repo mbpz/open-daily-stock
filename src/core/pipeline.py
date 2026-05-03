@@ -458,25 +458,27 @@ class StockAnalysisPipeline:
             return None
     
     def run(
-        self, 
+        self,
         stock_codes: Optional[List[str]] = None,
         dry_run: bool = False,
-        send_notification: bool = True
+        send_notification: bool = True,
+        progress_callback: Optional[callable] = None
     ) -> List[AnalysisResult]:
         """
         运行完整的分析流程
-        
+
         流程：
         1. 获取待分析的股票列表
         2. 使用线程池并发处理
         3. 收集分析结果
         4. 发送通知
-        
+
         Args:
             stock_codes: 股票代码列表（可选，默认使用配置中的自选股）
             dry_run: 是否仅获取数据不分析
             send_notification: 是否发送推送通知
-            
+            progress_callback: 进度回调函数(stage, percent, message)
+
         Returns:
             分析结果列表
         """

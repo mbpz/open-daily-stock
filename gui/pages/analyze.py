@@ -69,20 +69,29 @@ class AnalyzePage(ft.Container):
             self._show_result("分析服务未初始化", is_error=True)
             return
 
-        self._result_area.content = ft.Column([
-            ft.ProgressRing(width=50, height=50),
-            ft.Text(f"正在分析 {code}...", color="#a0a0a0"),
-        ])
+        # Show progress indicators
+        self._progress_ring.visible = True
+        self._status_text.value = f"正在分析 {code}..."
+        self._status_text.visible = True
+        self._progress_ring.update()
+        self._status_text.update()
+
+        self._result_area.content = ft.Text(f"正在分析 {code}...", color="#a0a0a0")
         self._result_area.update()
 
         # Run analysis in background task
         self.app.page.run_task(self._run_analysis_async, code)
 
+    def _update_progress(self, stage: str, percent: int, message: str):
+        """Update progress callback"""
+        self._status_text.value = message
+        self._status_text.update()
+
     async def _run_analysis_async(self, code: str):
         """Run analysis asynchronously"""
         try:
             # Run synchronous pipeline in thread pool to avoid blocking
-            results = await asyncio.to_thread(self._pipeline.run, [code])
+            results = await asyncio.to_thread(self._pipeline.run, [code], progress_callback=self._update_progress)
             if results and len(results) > 0:
                 result = results[0]
                 self._show_result(self._format_result(result))
@@ -90,6 +99,11 @@ class AnalyzePage(ft.Container):
                 self._show_result(f"未能获取 {code} 的分析结果", is_error=True)
         except Exception as ex:
             self._show_result(f"分析失败: {str(ex)}", is_error=True)
+        finally:
+            self._progress_ring.visible = False
+            self._status_text.visible = False
+            self._progress_ring.update()
+            self._status_text.update()
 
     def _format_result(self, result) -> str:
         """Format analysis result for display"""
