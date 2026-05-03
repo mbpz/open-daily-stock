@@ -63,6 +63,7 @@ class StockAnalysisPipeline:
         self.max_workers = max_workers or self.config.max_workers
         self.source_message = source_message
         self._progress_callback = progress_callback
+        self._run_progress_callback = None  # Will be set in run()
         
         # 初始化各模块
         self.db = get_db()
@@ -374,9 +375,10 @@ class StockAnalysisPipeline:
 
     def _report_progress(self, stage: str, percent: int, message: str):
         """报告进度回调"""
-        if self._progress_callback:
+        callback = self._run_progress_callback or self._progress_callback
+        if callback:
             try:
-                self._progress_callback(stage, percent, message)
+                callback(stage, percent, message)
             except Exception as e:
                 logger.warning(f"进度回调失败: {e}")
 
@@ -504,16 +506,19 @@ class StockAnalysisPipeline:
             分析结果列表
         """
         start_time = time.time()
-        
+
         # 使用配置中的股票列表
         if stock_codes is None:
             self.config.refresh_stock_list()
             stock_codes = self.config.stock_list
-        
+
         if not stock_codes:
             logger.error("未配置自选股列表，请在 .env 文件中设置 STOCK_LIST")
             return []
-        
+
+        # Store progress callback for use in process_single_stock
+        self._run_progress_callback = progress_callback
+
         logger.info(f"===== 开始分析 {len(stock_codes)} 只股票 =====")
         logger.info(f"股票列表: {', '.join(stock_codes)}")
         logger.info(f"并发数: {self.max_workers}, 模式: {'仅获取数据' if dry_run else '完整分析'}")
