@@ -6,12 +6,14 @@ from datetime import datetime
 from typing import Dict, Any, List
 
 from .config import get_config
+from .alert_service import AlertService
 
 class DataService:
     def __init__(self):
         self._running = True
         self._db_path = ".open-daily-stock.db"
         self._init_db()
+        self._alert_service = AlertService()
 
     def _init_db(self):
         """初始化 SQLite 数据库"""
@@ -78,13 +80,16 @@ class DataService:
                 df = fetcher.get_daily_data(stock, days=1)
                 if df is not None and len(df) > 0:
                     latest = df.iloc[-1]
-                    self._save_market({
+                    market = {
                         "code": stock,
                         "name": latest.get("name", ""),
                         "price": latest.get("close", 0),
                         "change_pct": latest.get("pct_chg", 0),
                         "volume": latest.get("volume", 0),
-                    })
+                    }
+                    self._save_market(market)
+                    # 检查是否需要发送异动提醒
+                    self._alert_service.check_and_alert_from_change_pct(market)
             except Exception as e:
                 print(f"Failed to fetch {stock}: {e}", file=sys.stderr)
 
