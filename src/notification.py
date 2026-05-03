@@ -20,6 +20,8 @@ import json
 import smtplib
 import re
 import markdown2
+import sys
+import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from email.mime.text import MIMEText
@@ -34,10 +36,21 @@ try:
 except ImportError:
     discord_available = False
 
+# Windows toast notification support (optional, only on Windows)
+try:
+    if sys.platform == 'win32':
+        from win10toast import ToastNotifier
+        win10toast_available = True
+    else:
+        win10toast_available = False
+except ImportError:
+    win10toast_available = False
+
 from src.config import get_config
 from src.analyzer import AnalysisResult
 from dataclasses import dataclass
 from typing import Optional
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 @dataclass
 class BotMessage:
@@ -66,6 +79,7 @@ class NotificationChannel(Enum):
     PUSHPLUS = "pushplus"  # PushPlus（国内推送服务）
     CUSTOM = "custom"      # 自定义 Webhook
     DISCORD = "discord"    # Discord 机器人 (Bot)
+    WINDOWS = "windows"   # Windows Toast 通知
     UNKNOWN = "unknown"    # 未知
 
 
@@ -113,6 +127,7 @@ class ChannelDetector:
             NotificationChannel.PUSHPLUS: "PushPlus",
             NotificationChannel.CUSTOM: "自定义Webhook",
             NotificationChannel.DISCORD: "Discord机器人",
+            NotificationChannel.WINDOWS: "Windows通知",
             NotificationChannel.UNKNOWN: "未知渠道",
         }
         return names.get(channel, "未知渠道")
@@ -240,7 +255,11 @@ class NotificationService:
         # Discord
         if self._is_discord_configured():
             channels.append(NotificationChannel.DISCORD)
-        
+
+        # Windows Toast 通知（仅在 Windows 平台可用）
+        if sys.platform == 'win32' and win10toast_available:
+            channels.append(NotificationChannel.WINDOWS)
+
         return channels
     
     def _is_telegram_configured(self) -> bool:
@@ -1357,21 +1376,26 @@ class NotificationService:
                 truncated = truncated[:-1]
         return ""
     
-    def _send_wechat_message(self, content: str) -> bool:
-        """发送企业微信消息"""
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((requests.RequestException, ConnectionError))
+    )
+    def _send_wechat_message_with_retry(self, content: str) -> bool:
+        """发送企业微信消息（带重试）"""
         payload = {
             "msgtype": "markdown",
             "markdown": {
                 "content": content
             }
         }
-        
+
         response = requests.post(
             self._wechat_url,
             json=payload,
             timeout=10
         )
-        
+
         if response.status_code == 200:
             result = response.json()
             if result.get('errcode') == 0:
@@ -1379,9 +1403,20 @@ class NotificationService:
                 return True
             else:
                 logger.error(f"企业微信返回错误: {result}")
-                return False
+                raise requests.RequestException(f"企业微信返回错误: {result}")
         else:
             logger.error(f"企业微信请求失败: {response.status_code}")
+            raise requests.RequestException(f"企业微信请求失败: {response.status_code}")
+
+    def _send_wechat_message(self, content: str) -> bool:
+        """发送企业微信消息"""
+        try:
+            return self._send_wechat_message_with_retry(content)
+        except requests.RequestException as e:
+            logger.error(f"企业微信消息发送失败（已重试3次）: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"企业微信消息发送异常: {e}")
             return False
     
     def send_to_feishu(self, content: str) -> bool:
@@ -1574,8 +1609,13 @@ class NotificationService:
         
         return success_count == total_chunks
     
-    def _send_feishu_message(self, content: str) -> bool:
-        """发送单条飞书消息（优先使用 Markdown 卡片）"""
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((requests.RequestException, ConnectionError))
+    )
+    def _send_feishu_message_with_retry(self, content: str) -> bool:
+        """发送单条飞书消息（带重试，优先使用 Markdown 卡片）"""
         def _post_payload(payload: Dict[str, Any]) -> bool:
             logger.debug(f"飞书请求 URL: {self._feishu_url}")
             logger.debug(f"飞书请求 payload 长度: {len(content)} 字符")
@@ -1600,11 +1640,11 @@ class NotificationService:
                     error_code = result.get('code') or result.get('StatusCode', 'N/A')
                     logger.error(f"飞书返回错误 [code={error_code}]: {error_msg}")
                     logger.error(f"完整响应: {result}")
-                    return False
+                    raise requests.RequestException(f"飞书返回错误 [code={error_code}]: {error_msg}")
             else:
                 logger.error(f"飞书请求失败: HTTP {response.status_code}")
                 logger.error(f"响应内容: {response.text}")
-                return False
+                raise requests.RequestException(f"飞书请求失败: HTTP {response.status_code}")
 
         # 1) 优先使用交互卡片（支持 Markdown 渲染）
         card_payload = {
@@ -1641,6 +1681,17 @@ class NotificationService:
         }
 
         return _post_payload(text_payload)
+
+    def _send_feishu_message(self, content: str) -> bool:
+        """发送单条飞书消息（优先使用 Markdown 卡片）"""
+        try:
+            return self._send_feishu_message_with_retry(content)
+        except requests.RequestException as e:
+            logger.error(f"飞书消息发送失败（已重试3次）: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"飞书消息发送异常: {e}")
+            return False
 
     def _format_feishu_markdown(self, content: str) -> str:
         """
@@ -1966,21 +2017,26 @@ class NotificationService:
             logger.debug(traceback.format_exc())
             return False
     
-    def _send_telegram_message(self, api_url: str, chat_id: str, text: str) -> bool:
-        """发送单条 Telegram 消息"""
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((requests.RequestException, ConnectionError))
+    )
+    def _send_telegram_message_with_retry(self, api_url: str, chat_id: str, text: str) -> bool:
+        """发送单条 Telegram 消息（带重试）"""
         # 转换 Markdown 为 Telegram 支持的格式
         # Telegram 的 Markdown 格式稍有不同，做简单处理
         telegram_text = self._convert_to_telegram_markdown(text)
-        
+
         payload = {
             "chat_id": chat_id,
             "text": telegram_text,
             "parse_mode": "Markdown",
             "disable_web_page_preview": True
         }
-        
+
         response = requests.post(api_url, json=payload, timeout=10)
-        
+
         if response.status_code == 200:
             result = response.json()
             if result.get('ok'):
@@ -1989,23 +2045,34 @@ class NotificationService:
             else:
                 error_desc = result.get('description', '未知错误')
                 logger.error(f"Telegram 返回错误: {error_desc}")
-                
+
                 # 如果 Markdown 解析失败，尝试纯文本发送
                 if 'parse' in error_desc.lower() or 'markdown' in error_desc.lower():
                     logger.info("尝试使用纯文本格式重新发送...")
                     payload['parse_mode'] = None
                     payload['text'] = text  # 使用原始文本
                     del payload['parse_mode']
-                    
+
                     response = requests.post(api_url, json=payload, timeout=10)
                     if response.status_code == 200 and response.json().get('ok'):
                         logger.info("Telegram 消息发送成功（纯文本）")
                         return True
-                
-                return False
+
+                raise requests.RequestException(f"Telegram 返回错误: {error_desc}")
         else:
             logger.error(f"Telegram 请求失败: HTTP {response.status_code}")
             logger.error(f"响应内容: {response.text}")
+            raise requests.RequestException(f"Telegram 请求失败: HTTP {response.status_code}")
+
+    def _send_telegram_message(self, api_url: str, chat_id: str, text: str) -> bool:
+        """发送单条 Telegram 消息"""
+        try:
+            return self._send_telegram_message_with_retry(api_url, chat_id, text)
+        except requests.RequestException as e:
+            logger.error(f"Telegram 消息发送失败（已重试3次）: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Telegram 消息发送异常: {e}")
             return False
     
     def _send_telegram_chunked(self, api_url: str, chat_id: str, content: str, max_length: int) -> bool:
@@ -2341,7 +2408,13 @@ class NotificationService:
         url_lower = (url or "").lower()
         return 'dingtalk' in url_lower or 'oapi.dingtalk.com' in url_lower
 
-    def _post_custom_webhook(self, url: str, payload: dict, timeout: int = 30) -> bool:
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((requests.RequestException, ConnectionError))
+    )
+    def _post_custom_webhook_with_retry(self, url: str, payload: dict, timeout: int = 30) -> bool:
+        """发送自定义 Webhook 请求（带重试）"""
         headers = {
             'Content-Type': 'application/json; charset=utf-8',
             'User-Agent': 'StockAnalysis/1.0',
@@ -2352,10 +2425,22 @@ class NotificationService:
         body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
         response = requests.post(url, data=body, headers=headers, timeout=timeout)
         if response.status_code == 200:
+            logger.info(f"自定义 Webhook 请求成功")
             return True
         logger.error(f"自定义 Webhook 推送失败: HTTP {response.status_code}")
         logger.debug(f"响应内容: {response.text[:200]}")
-        return False
+        raise requests.RequestException(f"自定义 Webhook 失败: HTTP {response.status_code}")
+
+    def _post_custom_webhook(self, url: str, payload: dict, timeout: int = 30) -> bool:
+        """发送自定义 Webhook 请求"""
+        try:
+            return self._post_custom_webhook_with_retry(url, payload, timeout)
+        except requests.RequestException as e:
+            logger.error(f"自定义 Webhook 请求失败（已重试3次）: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"自定义 Webhook 请求异常: {e}")
+            return False
 
     def _chunk_markdown_by_bytes(self, content: str, max_bytes: int) -> List[str]:
         def get_bytes(s: str) -> int:
@@ -2709,7 +2794,46 @@ class NotificationService:
         except Exception as e:
             logger.error(f"Discord Bot 发送异常: {e}")
             return False
-    
+
+    def send_to_windows(self, content: str, title: Optional[str] = None) -> bool:
+        """
+        推送 Windows Toast 通知（仅在 Windows 平台有效）
+
+        使用 win10toast 显示系统级通知
+
+        Args:
+            content: 通知内容
+            title: 通知标题（可选，默认"股票分析报告"）
+
+        Returns:
+            是否发送成功
+        """
+        if not win10toast_available:
+            logger.debug("Windows Toast 通知不可用（win10toast 未安装或非 Windows 平台）")
+            return False
+
+        if title is None:
+            date_str = datetime.now().strftime('%Y-%m-%d')
+            title = f"股票分析报告 - {date_str}"
+
+        try:
+            # 截断内容（Windows Toast 通知内容有限制）
+            max_len = 200
+            truncated_content = content[:max_len] + "..." if len(content) > max_len else content
+
+            toaster = ToastNotifier()
+            toaster.show_toast(
+                title=title,
+                msg=truncated_content,
+                duration=5,
+                threaded=False
+            )
+            logger.info("Windows Toast 通知发送成功")
+            return True
+        except Exception as e:
+            logger.error(f"Windows Toast 通知发送失败: {e}")
+            return False
+
     def send(self, content: str) -> bool:
         """
         统一发送接口 - 向所有已配置的渠道发送
@@ -2756,19 +2880,22 @@ class NotificationService:
                     result = self.send_to_custom(content)
                 elif channel == NotificationChannel.DISCORD:
                     result = self.send_to_discord(content)
+                elif channel == NotificationChannel.WINDOWS:
+                    result = self.send_to_windows(content)
                 else:
                     logger.warning(f"不支持的通知渠道: {channel}")
                     result = False
-                
+
                 if result:
                     success_count += 1
                 else:
                     fail_count += 1
-                    
+                    logger.warning(f"{channel_name} 推送返回失败")
+
             except Exception as e:
-                logger.error(f"{channel_name} 发送失败: {e}")
+                logger.error(f"{channel_name} 推送异常: {e}")
                 fail_count += 1
-        
+
         logger.info(f"通知发送完成：成功 {success_count} 个，失败 {fail_count} 个")
         return success_count > 0 or context_success
     
