@@ -10,10 +10,34 @@ class LogsPage(ft.Container):
     def __init__(self, app):
         super().__init__()
         self.app = app
+        self._filter_level = "all"
+        self._search_query = ""
 
         header = ft.Text(_("运行日志"), size=24, weight=ft.FontWeight.BOLD)
 
+        self._search_field = ft.TextField(
+            hint_text=_("搜索日志..."),
+            prefix_icon=ft.Icons.SEARCH,
+            on_change=self._on_search_change,
+            expand=True,
+        )
+
+        self._level_dropdown = ft.Dropdown(
+            label=_("级别"),
+            value="all",
+            width=120,
+            options=[
+                ft.dropdown.Option("all", _("全部")),
+                ft.dropdown.Option("info", "INFO"),
+                ft.dropdown.Option("warning", "WARNING"),
+                ft.dropdown.Option("error", "ERROR"),
+            ],
+            on_select=self._on_level_change,
+        )
+
         toolbar = ft.Row([
+            self._search_field,
+            self._level_dropdown,
             ft.IconButton(
                 icon=ft.Icons.REFRESH,
                 on_click=self._load_logs,
@@ -32,17 +56,27 @@ class LogsPage(ft.Container):
 
         self.content = ft.Container(
             content=ft.Column([
-                ft.Row([header, toolbar]),
+                ft.Row([header]),
+                ft.Row([toolbar]),
                 ft.Divider(height=2, color=CARD_BORDER),
                 self._log_content,
             ]),
             padding=10,
         )
 
+    def _on_search_change(self, e):
+        self._search_query = e.control.value.lower()
+        self._load_logs(None)
+
+    def _on_level_change(self, e):
+        self._filter_level = e.control.value
+        self._load_logs(None)
+
     def _load_logs(self, e):
         """加载日志"""
         try:
             log_dir = Path("./logs")
+            display_lines = []
             if log_dir.exists():
                 log_files = sorted(log_dir.glob("stock_analysis_*.log"))
                 if log_files:
@@ -57,8 +91,14 @@ class LogsPage(ft.Container):
                         except RuntimeError:
                             pass
                         return
-                    lines = content.split("\n")[-100:]
-                    display = "\n".join(lines)
+                    for line in content.split("\n")[-100:]:
+                        level = self._filter_level
+                        if level != "all" and level not in line.lower():
+                            continue
+                        if self._search_query and self._search_query not in line.lower():
+                            continue
+                        display_lines.append(line)
+                    display = "\n".join(display_lines) if display_lines else _("暂无日志")
                     self._log_text.value = display
                     self._log_text.size = 11
                     self._log_text.font_family = "monospace"

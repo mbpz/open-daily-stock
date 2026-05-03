@@ -1,6 +1,6 @@
 """Logs module showing log output from existing log files."""
 from pathlib import Path
-from textual.widgets import Static, Input
+from textual.widgets import Static, Input, Button
 from textual.events import Key
 from datetime import datetime
 from src.i18n import _
@@ -17,6 +17,10 @@ class LogsView(Static):
         self._result_count = 0
         self._search_input: Input | None = None
         self._content_display: Static | None = None
+        self._btn_all: Button | None = None
+        self._btn_info: Button | None = None
+        self._btn_warning: Button | None = None
+        self._btn_error: Button | None = None
 
     def load_logs(self):
         """Load recent log entries from logs/ directory."""
@@ -72,15 +76,15 @@ class LogsView(Static):
         if event.input.id == "log-search":
             self.set_search(event.value)
 
-    def on_key(self, event: Key):
-        """Handle key events for filter buttons."""
-        if event.key in ("f1", "1"):
+    def on_button_pressed(self, event: Button.Pressed):
+        """Handle button presses for filter."""
+        if event.button.id == "btn-all":
             self.set_filter("all")
-        elif event.key in ("f2", "2"):
+        elif event.button.id == "btn-info":
             self.set_filter("info")
-        elif event.key in ("f3", "3"):
+        elif event.button.id == "btn-warning":
             self.set_filter("warning")
-        elif event.key in ("f4", "4"):
+        elif event.button.id == "btn-error":
             self.set_filter("error")
 
     def _update_display(self):
