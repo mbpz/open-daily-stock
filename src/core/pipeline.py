@@ -17,6 +17,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from typing import List, Dict, Any, Optional, Tuple
 
+import json
+from datetime import datetime
+
 from src.config import get_config, Config
 from src.storage import get_db
 from data_provider import DataFetcherManager
@@ -429,7 +432,25 @@ class StockAnalysisPipeline:
                     f"[{code}] 分析完成: {result.operation_advice}, "
                     f"评分 {result.sentiment_score}"
                 )
-                
+
+                # 保存分析结果到数据库
+                try:
+                    result_json = json.dumps({
+                        'sentiment_score': result.sentiment_score,
+                        'trend_prediction': result.trend_prediction,
+                        'operation_advice': result.operation_advice,
+                        'confidence_level': result.confidence_level,
+                        'trend_analysis': result.trend_analysis,
+                        'short_term_outlook': result.short_term_outlook,
+                        'support_resistance': result.support_resistance,
+                        'risk_alert': result.risk_alert,
+                        'name': result.name,
+                    }, ensure_ascii=False)
+                    self.db.save_analysis_history(code, "done", result_json)
+                    logger.debug(f"[{code}] 分析结果已保存到数据库")
+                except Exception as e:
+                    logger.warning(f"[{code}] 保存分析结果失败: {e}")
+
                 # 单股推送模式（#55）：每分析完一只股票立即推送
                 if single_stock_notify and self.notifier.is_available():
                     try:

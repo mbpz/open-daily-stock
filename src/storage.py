@@ -11,10 +11,12 @@ A股自选股智能分析系统 - 存储层
 4. 实现智能更新逻辑（断点续传）
 """
 
+from __future__ import annotations
+
 import atexit
 import logging
 from datetime import datetime, date, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from pathlib import Path
 
 import pandas as pd
@@ -31,6 +33,7 @@ from sqlalchemy import (
     select,
     and_,
     desc,
+    Text,
 )
 from sqlalchemy.orm import (
     declarative_base,
@@ -484,6 +487,124 @@ class DatabaseManager:
             return "短期走弱 🔽"
         else:
             return "震荡整理 ↔️"
+
+
+class AnalysisHistory(Base):
+    """
+    分析历史记录模型
+
+    存储历史分析任务的结果，支持回放功能
+    """
+    __tablename__ = 'analysis_history'
+
+    # 主键
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # 股票代码
+    code = Column(String(10), nullable=False, index=True)
+
+    # 时间戳
+    timestamp = Column(DateTime, default=datetime.now, index=True)
+
+    # 状态：pending/running/done/failed
+    status = Column(String(20), default="pending")
+
+    # 分析结果 JSON
+    result_json = Column(Text)
+
+    # 错误信息
+    error = Column(Text)
+
+    def __repr__(self):
+        return f"<AnalysisHistory(code={self.code}, status={self.status}, timestamp={self.timestamp})>"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        return {
+            'id': self.id,
+            'code': self.code,
+            'timestamp': self.timestamp.isoformat() if self.timestamp else None,
+            'status': self.status,
+            'result_json': self.result_json,
+            'error': self.error,
+        }
+
+
+    def save_analysis_history(
+        self,
+        code: str,
+        status: str,
+        result_json: Optional[str] = None,
+        error: Optional[str] = None
+    ) -> int:
+        """
+        保存分析历史记录
+
+        Args:
+            code: 股票代码
+            status: 状态（pending/running/done/failed）
+            result_json: 分析结果 JSON 字符串
+            error: 错误信息
+
+        Returns:
+            新增记录的 ID
+        """
+        with self.get_session() as session:
+            history = AnalysisHistory(
+                code=code,
+                timestamp=datetime.now(),
+                status=status,
+                result_json=result_json,
+                error=error
+            )
+            session.add(history)
+            session.commit()
+            return history.id
+
+    def get_analysis_history(
+        self,
+        limit: int = 50
+    ) -> List[AnalysisHistory]:
+        """
+        获取分析历史记录
+
+        Args:
+            limit: 返回记录数限制
+
+        Returns:
+            AnalysisHistory 对象列表（按时间降序）
+        """
+        with self.get_session() as session:
+            results = session.execute(
+                select(AnalysisHistory)
+                .order_by(desc(AnalysisHistory.timestamp))
+                .limit(limit)
+            ).scalars().all()
+            return list(results)
+
+    def get_analysis_history_by_code(
+        self,
+        code: str,
+        limit: int = 10
+    ) -> List[AnalysisHistory]:
+        """
+        获取指定股票的分析历史记录
+
+        Args:
+            code: 股票代码
+            limit: 返回记录数限制
+
+        Returns:
+            AnalysisHistory 对象列表（按时间降序）
+        """
+        with self.get_session() as session:
+            results = session.execute(
+                select(AnalysisHistory)
+                .where(AnalysisHistory.code == code)
+                .order_by(desc(AnalysisHistory.timestamp))
+                .limit(limit)
+            ).scalars().all()
+            return list(results)
 
 
 # 便捷函数
