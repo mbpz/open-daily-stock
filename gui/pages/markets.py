@@ -1,5 +1,6 @@
 """行情页面"""
 import flet as ft
+import asyncio
 from datetime import datetime
 from gui.theme import SUCCESS_COLOR, ERROR_COLOR, TEXT_SECONDARY, CARD_BG, CARD_BORDER
 from src.i18n import _
@@ -32,6 +33,7 @@ class MarketsPage(ft.Container):
                 ft.DataColumn(ft.Text(_("最新价"), weight=ft.FontWeight.BOLD)),
                 ft.DataColumn(ft.Text(_("涨跌幅"), weight=ft.FontWeight.BOLD)),
                 ft.DataColumn(ft.Text(_("成交量"), weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text(_("操作"), weight=ft.FontWeight.BOLD)),
             ],
             rows=[],
         )
@@ -66,6 +68,7 @@ class MarketsPage(ft.Container):
                 ft.DataCell(ft.Text("")),
                 ft.DataCell(ft.Text("")),
                 ft.DataCell(ft.Text("")),
+                ft.DataCell(ft.Text("")),
             ])
         )
         self._table_container.update()
@@ -76,15 +79,41 @@ class MarketsPage(ft.Container):
             change = market.get('change', 0)
             change_str = f"{change:+.2f}%" if change != 0 else "0.00%"
             change_color = SUCCESS_COLOR if change >= 0 else ERROR_COLOR
+            code = market.get('code', '')
             self.table.rows.append(
                 ft.DataRow(cells=[
-                    ft.DataCell(ft.Text(market.get('code', ''))),
+                    ft.DataCell(ft.Text(code)),
                     ft.DataCell(ft.Text(market.get('name', ''))),
                     ft.DataCell(ft.Text(f"{market.get('price', 0):.2f}")),
                     ft.DataCell(ft.Text(change_str, color=change_color)),
                     ft.DataCell(ft.Text(market.get('volume', ''))),
+                    ft.DataCell(
+                        ft.IconButton(
+                            icon=ft.Icons.SHOW_CHART,
+                            tooltip=_("查看K线"),
+                            on_click=lambda e, c=code: self._show_chart(c),
+                        )
+                    ),
                 ])
             )
+
+    def _show_chart(self, code):
+        """打开K线图表页面"""
+        self.app.nav_index = 0  # 切换到K线页面
+        self.app.nav_rail.selected_index = 0
+        self.app.page.run_task(self.app._load_page, "chart")
+        # 设置股票代码到chart页面的输入框
+        self.app.page.run_task(self._set_chart_code, code)
+
+    async def _set_chart_code(self, code):
+        """设置chart页面的股票代码"""
+        await asyncio.sleep(0.1)  # 等待页面加载
+        if hasattr(self.app, 'content_area') and hasattr(self.app.content_area, 'content'):
+            content = self.app.content_area.content
+            if hasattr(content, '_code_input'):
+                content._code_input.value = code
+                content._code_input.update()
+                content._show_chart(None)  # 自动触发显示
 
     async def _fetch_and_update(self):
         """异步获取数据并更新界面"""

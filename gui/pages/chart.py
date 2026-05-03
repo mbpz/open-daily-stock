@@ -1,9 +1,9 @@
 """K线图表页面"""
 import flet as ft
-import matplotlib.pyplot as plt
 import base64
 from io import BytesIO
 import pandas as pd
+import mplfinance as mpf
 
 from gui.theme import CARD_BG, CARD_BORDER, TEXT_SECONDARY, ACCENT_COLOR
 
@@ -148,56 +148,62 @@ def get_daily_data_sync(code: str, days: int = 60) -> pd.DataFrame:
 
 def generate_candlestick_sync(df: pd.DataFrame, code: str) -> str:
     """生成K线图并返回base64编码"""
-    fig, ax = plt.subplots(figsize=(10, 6))
+    # 准备数据：确保列名为 mplfinance 需要的格式
+    df = df.copy()
+    df.columns = [c.lower() for c in df.columns]
 
-    # 设置中文字体
-    plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS', 'DejaVu Sans']
-    plt.rcParams['axes.unicode_minus'] = False
+    # 设置日期为索引
+    if 'date' in df.columns:
+        df['date'] = pd.to_datetime(df['date'])
+        df.set_index('date', inplace=True)
 
-    # 获取数据索引
-    indices = range(len(df))
+    # 重命名列以匹配 mplfinance 要求
+    df = df.rename(columns={
+        'open': 'Open',
+        'high': 'High',
+        'low': 'Low',
+        'close': 'Close',
+        'volume': 'Volume'
+    })
 
-    # 绘制K线
-    for idx, (_, row) in enumerate(df.iterrows()):
-        open_price = float(row['open'])
-        close_price = float(row['close'])
-        high_price = float(row['high'])
-        low_price = float(row['low'])
+    # 只保留需要的列
+    df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
 
-        # 颜色：绿色上涨，红色下跌
-        color = 'green' if close_price >= open_price else 'red'
+    # 设置样式
+    mc = mpf.make_marketcolors(
+        up='green', down='red',
+        edge='inherit',
+        wick='inherit',
+        volume='in',
+    )
+    style = mpf.make_mpf_style(
+        marketcolors=mc,
+        gridstyle='-',
+        gridcolor='#333333',
+        facecolor='white',
+        figcolor='white',
+        y_on_right=True,
+    )
 
-        # 绘制上下影线
-        ax.plot([idx, idx], [low_price, high_price], color=color, linewidth=1)
-
-        # 绘制实体（蜡烛体）
-        bottom = min(open_price, close_price)
-        height = abs(close_price - open_price)
-        if height == 0:
-            height = 0.01  # 避免零高度矩形
-        ax.bar(idx, height, bottom=bottom, width=0.6, color=color)
-
-    # 设置标题和标签
-    ax.set_title(f"K线 - {code}", fontsize=14)
-    ax.set_xlabel("交易日", fontsize=10)
-    ax.set_ylabel("价格", fontsize=10)
-
-    # 优化x轴刻度（显示部分日期）
-    total = len(df)
-    if total > 0:
-        step = max(1, total // 10)
-        tick_positions = list(range(0, total, step))
-        tick_labels = [str(df.iloc[i]['date'])[:10] if 'date' in df.columns else str(i) for i in tick_positions]
-        ax.set_xticks(tick_positions)
-        ax.set_xticklabels(tick_labels, rotation=45, fontsize=8)
-
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
+    # 绘制图表
+    fig, axes = mpf.plot(
+        df,
+        type='candle',
+        style=style,
+        title=f'{code} - K线',
+        ylabel='价格',
+        ylabel_lower='成交量',
+        volume=True,
+        figsize=(10, 6),
+        returnfig=True,
+        panel_ratios=(4, 2),
+    )
 
     # 保存到字节流
     buf = BytesIO()
-    plt.savefig(buf, format='png', dpi=80, facecolor='white')
-    plt.close()
+    fig.savefig(buf, format='png', dpi=80, facecolor='white')
+    import matplotlib.pyplot as plt
+    plt.close(fig)
 
     return base64.b64encode(buf.getvalue()).decode()
 
