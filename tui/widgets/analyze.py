@@ -1,7 +1,6 @@
 """Analyze module for triggering stock analysis."""
-from textual.widgets import Static, Input, Button
+from textual.widgets import Static, Input, Button, ProgressBar
 from textual.message import Message
-from textual.progress_bar import ProgressBar
 
 
 class AnalyzeView(Static):

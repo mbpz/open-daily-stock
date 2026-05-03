@@ -44,10 +44,15 @@ class HelpPanel(Static):
 
 def _make_analyze_callback(app: 'TUIApp'):
     """Create the on_analyze callback for AnalyzeView."""
-    def on_analyze(stock_code: str):
+    def on_analyze(stock_code: str, progress_callback=None):
         app._task_store.add_task(stock_code)
-        # Full pipeline integration will be done in Task 7
-        # For now, just add to task store and show "analyzing" state
+        # Run analysis with progress callback
+        if progress_callback:
+            asyncio.create_task(app._run_analysis_with_progress(stock_code, progress_callback))
+        else:
+            # Fallback: just add to task store
+            pass
+
     return on_analyze
 
 
@@ -174,3 +179,16 @@ class TUIApp(App):
     def _close_help(self):
         self._help_visible = False
         self.query_one(HelpPanel).display = False
+
+    async def _run_analysis_with_progress(self, stock_code: str, progress_callback):
+        """Run analysis with progress reporting."""
+        from src.core.pipeline import StockAnalysisPipeline
+        try:
+            pipeline = StockAnalysisPipeline(progress_callback=progress_callback)
+            result = await asyncio.to_thread(pipeline.process_single_stock, stock_code)
+            if result:
+                progress_callback("analysis_completed", 100, "分析完成")
+            else:
+                progress_callback("analysis_failed", 100, "分析失败")
+        except Exception as e:
+            progress_callback("analysis_error", 100, f"错误: {e}")
