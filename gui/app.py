@@ -2,6 +2,7 @@
 import flet as ft
 
 from gui.theme import PRIMARY_COLOR, TEXT_PRIMARY, TEXT_SECONDARY
+from src.i18n import _
 
 VERSION = "0.2.1"
 from src.service_client import ServiceClient
@@ -15,11 +16,11 @@ class StockApp:
 
     def __init__(self, page: ft.Page):
         self.page = page
-        self.page.title = "Stock Analysis"
+        self.page.title = _("stock_analysis")
         self.page.bgcolor = PRIMARY_COLOR
 
         self.nav_index = 0
-        self.status_text = "最后更新"
+        self.status_text = _("last_update")
 
         # Initialize ServiceClient for DataService communication
         self._client = ServiceClient()
@@ -41,27 +42,27 @@ class StockApp:
             destinations=[
                 ft.NavigationRailDestination(
                     icon=ft.Icons.SHOW_CHART,
-                    label="K线"
+                    label=_("chart")
                 ),
                 ft.NavigationRailDestination(
                     icon=ft.Icons.CANDLESTICK_CHART,
-                    label="行情"
+                    label=_("markets")
                 ),
                 ft.NavigationRailDestination(
                     icon=ft.Icons.ANALYTICS,
-                    label="分析"
+                    label=_("analyze")
                 ),
                 ft.NavigationRailDestination(
                     icon=ft.Icons.HISTORY,
-                    label="任务"
+                    label=_("tasks")
                 ),
                 ft.NavigationRailDestination(
                     icon=ft.Icons.SETTINGS,
-                    label="配置"
+                    label=_("config")
                 ),
                 ft.NavigationRailDestination(
                     icon=ft.Icons.DESCRIPTION,
-                    label="日志"
+                    label=_("logs")
                 ),
             ],
             on_change=self._on_nav_change,
@@ -70,13 +71,13 @@ class StockApp:
         # Status bar with version and update button
         self.status_bar = ft.Container(
             content=ft.Row([
-                ft.Text(f"最后更新: {self.status_text}", color=TEXT_SECONDARY, size=14),
+                ft.Text(f"{_('last_update')}: {self.status_text}", color=TEXT_SECONDARY, size=14),
                 ft.Container(expand=True),
                 ft.Text(f"v{VERSION}", color=TEXT_SECONDARY, size=12),
                 ft.IconButton(
                     icon=ft.Icons.UPDATE,
                     on_click=self._check_update,
-                    tooltip="检查更新",
+                    tooltip=_("check_update"),
                 ),
             ]),
             padding=10,
@@ -86,7 +87,7 @@ class StockApp:
 
         # Content area
         self.content_area = ft.Container(
-            content=ft.Text("Loading...", color=TEXT_PRIMARY),
+            content=ft.Text(_("loading"), color=TEXT_PRIMARY),
             expand=True,
             padding=20,
         )
@@ -131,7 +132,7 @@ class StockApp:
 
         if page_name not in page_map:
             self.content_area.content = ft.Text(
-                f"Unknown page: {page_name}",
+                f"{_('unknown_page')}: {page_name}",
                 color=ft.colors.RED
             )
             self.page.update()
@@ -155,7 +156,7 @@ class StockApp:
         except (ImportError, AttributeError) as ex:
             self.content_area.content = ft.Column([
                 ft.Text(
-                    f"Failed to load {page_name} page",
+                    f"{_('failed_to_load')} {page_name}",
                     color=ft.colors.RED,
                     size=16,
                 ),
@@ -171,13 +172,13 @@ class StockApp:
         """Update the status bar text"""
         self.status_text = text
         self.status_bar.content = ft.Row([
-            ft.Text(f"最后更新: {self.status_text}", color=TEXT_SECONDARY, size=14),
+            ft.Text(f"{_('last_update')}: {self.status_text}", color=TEXT_SECONDARY, size=14),
             ft.Container(expand=True),
             ft.Text(f"v{VERSION}", color=TEXT_SECONDARY, size=12),
             ft.IconButton(
                 icon=ft.Icons.UPDATE,
                 on_click=self._check_update,
-                tooltip="检查更新",
+                tooltip=_("check_update"),
             ),
         ])
         self.status_bar.update()
@@ -187,18 +188,18 @@ class StockApp:
         from src.update_service import UpdateService
         latest, url = UpdateService.check_latest_version()
         if latest:
-            self.update_status(f"发现新版本 {latest}，点击更新")
+            self.update_status(f"{_('new_version')} {latest}，{_('click_to_update')}")
             self._pending_update_url = url
         else:
             self.page.show_snack_bar(
-                ft.SnackBar(content=ft.Text(f"已是最新版本 v{VERSION}"), open=True)
+                ft.SnackBar(content=ft.Text(f"{_('already_latest')} v{VERSION}"), open=True)
             )
 
     def _install_update(self, e):
         """Download and install pending update"""
         if hasattr(self, '_pending_update_url') and self._pending_update_url:
             url = self._pending_update_url
-            self.update_status("正在下载更新...")
+            self.update_status(_("downloading"))
             # Run download in background
             self.page.run_task(self._download_and_install, url)
         else:
@@ -211,8 +212,8 @@ class StockApp:
         try:
             success = UpdateService.download_and_install(url)
             if success:
-                self.update_status("更新完成，重启应用")
+                self.update_status(_("update_complete"))
             else:
-                self.update_status("更新失败")
+                self.update_status(_("update_failed"))
         except Exception as ex:
-            self.update_status(f"更新失败: {ex}")
+            self.update_status(f"{_('update_failed')}: {ex}")
