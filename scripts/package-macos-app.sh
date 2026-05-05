@@ -65,21 +65,29 @@ sed -i '' "s/__VERSION__/$VERSION/g" "$CONTENTS/Info.plist"
 
 # 3. 创建 DMG
 DMG_NAME="dist/open-daily-stock-gui-$VERSION-macos.dmg"
+SPARSE="dist/rw.temp.dmg"
 
 if ! command -v create-dmg &> /dev/null; then
     echo "create-dmg not found, installing via brew..."
     brew install create-dmg
 fi
 
-create-dmg \
-    --volname "Open Daily Stock" \
-    --window-pos 200 120 \
-    --window-size 600 400 \
-    --icon-size 100 \
-    --icon "$BUNDLE_PATH" 200 150 \
-    --hide-extension "$APPNAME" \
-    --app-drop-link 400 150 \
-    "$DMG_NAME" \
-    "$BUNDLE_PATH"
+# 使用 hdiutil 创建简单的 DMG
+hdiutil create "$SPARSE" \
+    -volname "Open Daily Stock" \
+    -fs HFS+ \
+    -size 200m \
+    -layout NONE
+
+hdiutil attach "$SPARSE" -mountpoint /Volumes/temp_dmg -nobrowse
+
+# 复制 .app 到 DMG
+cp -R "$BUNDLE_PATH" "/Volumes/temp_dmg/"
+
+hdiutil detach /Volumes/temp_dmg
+
+# 转换为最终 DMG（压缩）
+hdiutil convert "$SPARSE" -format UDZO -o "$DMG_NAME"
+rm -f "$SPARSE"
 
 echo "Done! DMG created: $DMG_NAME"
