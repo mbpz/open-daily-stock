@@ -1,0 +1,1 @@
+请将 tui.png 和 gui.png 截图添加到本目录
