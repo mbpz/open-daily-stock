@@ -1,5 +1,5 @@
 site_name: Open Daily Stock
-site_description: A股/港股/美股自选股智能分析系统
+site_description: A-share / HK-stock / US-stock intelligent analysis system
 site_url: https://mbpz.github.io/open-daily-stock/
 site_author: mbpz
 
@@ -31,7 +31,8 @@ theme:
     - search.highlight
 
 nav:
-  - Home: index.md
+  - Home: en/index.md
+  - 中文: zh/index.md
 
 markdown_extensions:
   - pymdownx.highlight:
