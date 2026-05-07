@@ -89,7 +89,7 @@ chmod +x open-daily-stock
 
 ## 下载地址
 
-[:material-github: GitHub Releases](https://github.com/mbpz/open-daily-stock/releases/latest){ .md-button .md-button--primary }
+**[GitHub Releases](https://github.com/mbpz/open-daily-stock/releases/latest)** — 点击下载最新版本
 
 ## 项目结构
 
