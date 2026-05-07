@@ -71,4 +71,4 @@ local/
 
 run.sh
 
-verify_*.py
+verify_*.pysite/
