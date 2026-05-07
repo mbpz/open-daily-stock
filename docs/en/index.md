@@ -4,27 +4,12 @@ A-share / HK-stock / US-stock intelligent analysis system
 
 ## Features
 
-<div class="grid cards" markdown>
-
-- **Multi-Market Coverage**
-  A-shares (AkShare), HK stocks, US stocks (YFinance)
-
-- **AI-Powered Analysis**
-  Gemini / DeepSeek / Tongyi and other LLMs for deep stock analysis
-
-- **Dual Interface Mode**
-  TUI terminal / GUI desktop, switch as needed
-
-- **Multi-Channel Notifications**
-  WeCom, Feishu, Telegram, Email alerts
-
-- **Cross-Platform**
-  macOS, Linux, Windows support
-
-- **Open Source & Free**
-  MIT License, fully open source
-
-</div>
+- **Multi-Market Coverage** — A-shares (AkShare), HK stocks, US stocks (YFinance)
+- **AI-Powered Analysis** — Gemini / DeepSeek / Tongyi and other LLMs for deep stock analysis
+- **Dual Interface Mode** — TUI terminal / GUI desktop, switch as needed
+- **Multi-Channel Notifications** — WeCom, Feishu, Telegram, Email alerts
+- **Cross-Platform** — macOS, Linux, Windows support
+- **Open Source & Free** — MIT License, fully open source
 
 ## Interface Preview
 

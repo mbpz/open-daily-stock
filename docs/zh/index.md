@@ -4,27 +4,12 @@ A 股 / 港股 / 美股自选股智能分析系统
 
 ## 核心特性
 
-<div class="grid cards" markdown>
-
-- **多市场覆盖**
-  A 股（AkShare）、港股、美股（YFinance）一网打尽
-
-- **AI 智能分析**
-  Gemini / DeepSeek / 通义等大模型，深度解读股票走势
-
-- **双模式界面**
-  TUI 终端 / GUI 图形，按需切换
-
-- **多渠道推送**
-  企业微信、飞书、Telegram、邮件及时通知
-
-- **跨平台支持**
-  macOS、Linux、Windows 全平台覆盖
-
-- **开源免费**
-  MIT License，完全开源
-
-</div>
+- **多市场覆盖** — A 股（AkShare）、港股、美股（YFinance）一网打尽
+- **AI 智能分析** — Gemini / DeepSeek / 通义等大模型，深度解读股票走势
+- **双模式界面** — TUI 终端 / GUI 图形，按需切换
+- **多渠道推送** — 企业微信、飞书、Telegram、邮件及时通知
+- **跨平台支持** — macOS、Linux、Windows 全平台覆盖
+- **开源免费** — MIT License，完全开源
 
 ## 界面预览
 
