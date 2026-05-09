@@ -52,6 +52,7 @@ class DataService:
             "get_positions": "_handle_get_positions",
             "get_institutional": "_handle_get_institutional",
             "get_dragon_board": "_handle_get_dragon_board",
+            "run_backtest": "_handle_run_backtest",
             "quit": "_handle_quit",
         }
 
@@ -501,6 +502,47 @@ class DataService:
         except Exception as e:
             logger.error(f"获取龙虎榜失败: {e}")
             return {"status": "error", "message": f"获取龙虎榜失败: {str(e)}"}
+
+    def _handle_run_backtest(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """运行回测"""
+        code = req.get("code")
+        if not code:
+            return {"status": "error", "message": "缺少股票代码 code 参数"}
+
+        initial_capital = req.get("initial_capital")
+        if initial_capital is None:
+            return {"status": "error", "message": "缺少 initial_capital 参数"}
+
+        days = req.get("days", 60)  # 默认 60 天
+
+        try:
+            # 获取历史数据
+            history_result = self._handle_get_history({"code": code, "days": days})
+            if history_result.get("status") != "ok":
+                return history_result
+
+            history_data = history_result.get("data", [])
+            if not history_data:
+                return {"status": "ok", "data": [], "message": "无历史数据"}
+
+            # 运行回测
+            from src.backtester import backtest, ma_crossover_strategy
+            result = backtest(history_data, initial_capital=initial_capital, strategy_fn=ma_crossover_strategy)
+
+            return {
+                "status": "ok",
+                "data": {
+                    "total_return": result.total_return,
+                    "max_drawdown": result.max_drawdown,
+                    "sharpe_ratio": result.sharpe_ratio,
+                    "num_trades": result.num_trades,
+                    "win_rate": result.win_rate,
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"回测失败 [{code}]: {e}")
+            return {"status": "error", "message": f"回测失败: {str(e)}"}
 
     # === Existing Helper Methods ===
 
