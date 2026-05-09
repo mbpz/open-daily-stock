@@ -4,85 +4,24 @@ import asyncio
 from datetime import datetime
 from gui.theme import SUCCESS_COLOR, ERROR_COLOR, TEXT_SECONDARY, CARD_BG, CARD_BORDER, WARNING_COLOR
 from src.i18n import _
+from src.shared.style import format_volume as _format_volume
+from src.shared.market_status import get_all_market_statuses
+
+
+def get_market_status_legacy() -> dict:
+    """Get market status for A股, HK, US markets - legacy function."""
+    status_dict = get_all_market_statuses()
+    return {market: (emoji, text) for market, (emoji, text) in status_dict.items()}
 
 
 def get_market_status() -> dict:
-    """Get market status for A股, HK, US markets"""
-    now = datetime.now()
-    # Use a fixed date for timezone handling
-    cn_tz = __import__('datetime').timezone(__import__('datetime').timedelta(hours=8))
-    now_cn = now.astimezone(cn_tz)
-    current_time = now_cn.strftime("%H:%M")
-    day_of_week = now_cn.weekday()  # 0=Monday, 6=Sunday
-
-    status = {}
-
-    # A股: 9:30-11:30, 13:00-15:00 CST (Mon-Fri)
-    if day_of_week < 5:
-        if "09:30" <= current_time <= "11:30" or "13:00" <= current_time <= "15:00":
-            status['A股'] = ('🟢', _('交易中'))
-        elif "09:00" <= current_time < "09:30" or "11:30" < current_time < "13:00":
-            status['A股'] = ('🟡', _('盘前'))
-        else:
-            status['A股'] = ('⚪', _('已休市'))
-    else:
-        status['A股'] = ('⚪', _('已休市'))
-
-    # HK: 9:30-12:00, 13:00-16:00 HKT (Mon-Fri)
-    hk_tz = __import__('datetime').timezone(__import__('datetime').timedelta(hours=9))
-    now_hk = now.astimezone(hk_tz)
-    hk_time = now_hk.strftime("%H:%M")
-    if day_of_week < 5:
-        if "09:30" <= hk_time <= "12:00" or "13:00" <= hk_time <= "16:00":
-            status['港股'] = ('🟢', _('交易中'))
-        elif "09:00" <= hk_time < "09:30" or "12:00" < hk_time < "13:00":
-            status['港股'] = ('🟡', _('盘前'))
-        else:
-            status['港股'] = ('⚪', _('已休市'))
-    else:
-        status['港股'] = ('⚪', _('已休市'))
-
-    # US: 9:30-16:00 EST (Mon-Fri)
-    est_tz = __import__('datetime').timezone(__import__('datetime').timedelta(hours=-5))
-    now_est = now.astimezone(est_tz)
-    us_time = now_est.strftime("%H:%M")
-    if day_of_week < 5:
-        if "09:30" <= us_time <= "16:00":
-            status['美股'] = ('🟢', _('交易中'))
-        elif "04:00" <= us_time < "09:30":
-            status['美股'] = ('🟡', _('盘前'))
-        else:
-            status['美股'] = ('⚪', _('已休市'))
-    else:
-        status['美股'] = ('⚪', _('已休市'))
-
-    return status
+    """Get market status for A股, HK, US markets - uses shared module."""
+    return get_market_status_legacy()
 
 
 def format_volume_display(volume: float, code: str) -> str:
-    """Format volume for display based on market type"""
-    if volume is None or volume == '':
-        return '---'
-    try:
-        v = float(volume)
-        # A股/港股 use 万 (ten thousands)
-        if code.startswith('hk') or (len(code) == 6 and code.isdigit() and not code.startswith('9')):
-            if v >= 100000000:
-                return f"{v/100000000:.1f}亿"
-            elif v >= 10000:
-                return f"{v/10000:.0f}万"
-            return f"{v:.0f}"
-        else:
-            # US stocks use M/B notation
-            if v >= 1000000000:
-                return f"{v/1000000000:.1f}B"
-            elif v >= 1000000:
-                return f"{v/1000000:.1f}M"
-            elif v >= 1000:
-                return f"{v/1000:.1f}K"
-            return f"{v:.0f}"
-    except (ValueError, TypeError):
-        return '---'
+    """Format volume for display based on market type - uses shared module."""
+    return _format_volume(volume, code)
 
 
 class MarketsPage(ft.Container):

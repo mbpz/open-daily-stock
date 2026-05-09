@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import time
 from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from pathlib import Path
@@ -45,6 +46,123 @@ from sqlalchemy.exc import IntegrityError
 from src.config import get_config
 
 logger = logging.getLogger(__name__)
+
+# ============================================================
+# Network Degradation Cache
+# ============================================================
+
+MARKET_DATA_CACHE_TTL = {
+    "A": 86400,   # A股: 1 day (seconds)
+    "HK": 3600,   # 港股: 1 hour
+    "US": 3600,   # 美股: 1 hour
+}
+
+
+class MarketDataCache:
+    """
+    市场数据缓存，用于网络降级时提供 fallback 数据
+
+    缓存结构：
+    {
+        "code": {
+            "data": {...},  # 市场数据
+            "timestamp": float,  # 缓存时间
+            "data_source": str,  # 数据来源
+        }
+    }
+    """
+    _instance: Optional['MarketDataCache'] = None
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(self):
+        if self._initialized:
+            return
+        self._cache: Dict[str, Dict[str, Any]] = {}
+        self._lock = __import__('threading').Lock()
+        self._initialized = True
+
+    @classmethod
+    def get_instance(cls) -> 'MarketDataCache':
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def set(self, code: str, data: Dict[str, Any], data_source: str = "Unknown") -> None:
+        """缓存市场数据"""
+        with self._lock:
+            self._cache[code] = {
+                "data": data,
+                "timestamp": time.time(),
+                "data_source": data_source,
+            }
+
+    def get(self, code: str) -> Optional[Dict[str, Any]]:
+        """获取缓存的市场数据"""
+        with self._lock:
+            if code not in self._cache:
+                return None
+            entry = self._cache[code]
+            return entry["data"]
+
+    def get_with_staleness(self, code: str) -> tuple[Optional[Dict[str, Any]], bool, float]:
+        """
+        获取缓存数据及其 staleness 信息
+
+        Returns:
+            (data, is_stale, age_seconds)
+        """
+        with self._lock:
+            if code not in self._cache:
+                return None, True, float('inf')
+
+            entry = self._cache[code]
+            age = time.time() - entry["timestamp"]
+
+            # 判断缓存类型
+            market_type = self._get_market_type(code)
+            ttl = MARKET_DATA_CACHE_TTL.get(market_type, 86400)
+
+            return entry["data"], age > ttl, age
+
+    def _get_market_type(self, code: str) -> str:
+        """判断市场类型"""
+        code_upper = code.upper()
+        if code_upper.startswith('HK'):
+            return "HK"
+        elif code_upper.isalpha() and len(code_upper) <= 5:
+            return "US"
+        else:
+            return "A"  # A股
+
+    def get_cached_data(self, code: str) -> Optional[Dict[str, Any]]:
+        """获取缓存数据（兼容性别名）"""
+        return self.get(code)
+
+    def clear_expired(self) -> int:
+        """清除过期缓存"""
+        with self._lock:
+            now = time.time()
+            expired_keys = []
+            for code, entry in self._cache.items():
+                market_type = self._get_market_type(code)
+                ttl = MARKET_DATA_CACHE_TTL.get(market_type, 86400)
+                if now - entry["timestamp"] > ttl:
+                    expired_keys.append(code)
+
+            for code in expired_keys:
+                del self._cache[code]
+
+            return len(expired_keys)
+
+
+def get_market_cache() -> MarketDataCache:
+    """获取市场数据缓存实例"""
+    return MarketDataCache.get_instance()
 
 # SQLAlchemy ORM 基类
 Base = declarative_base()
@@ -780,6 +898,82 @@ class DatabaseManager:
                 select(Market).where(Market.code == code)
             ).scalars().first()
 
+    # === Market Data Cache (for network degradation fallback) ===
+
+    def save_market_cache(self, code: str, data: Dict[str, Any], data_source: str) -> None:
+        """Save market data to cache for fallback when network fails"""
+        cache = get_market_cache()
+        cache.set(code, data, data_source)
+
+    def get_market_cache(self, code: str) -> Optional[Dict[str, Any]]:
+        """Get cached market data"""
+        cache = get_market_cache()
+        return cache.get(code)
+
+    def get_market_cache_with_staleness(self, code: str) -> tuple[Optional[Dict[str, Any]], bool, float]:
+        """Get cached market data with staleness info. Returns (data, is_stale, age_seconds)"""
+        cache = get_market_cache()
+        return cache.get_with_staleness(code)
+
+    # === Alert CRUD ===
+
+    def save_alert(self, stock: str, condition: str, threshold: float,
+                   channel: str = 'wechat', enabled: bool = True) -> Alert:
+        """Create a new alert"""
+        with self.get_session() as session:
+            alert = Alert(
+                stock=stock,
+                condition=condition,
+                threshold=threshold,
+                channel=channel,
+                enabled=1 if enabled else 0,
+            )
+            session.add(alert)
+            session.commit()
+            session.refresh(alert)
+            return alert
+
+    def get_alerts(self) -> List[Alert]:
+        """Get all alerts"""
+        with self.get_session() as session:
+            results = session.execute(
+                select(Alert).order_by(desc(Alert.created_at))
+            ).scalars().all()
+            return list(results)
+
+    def get_alert(self, alert_id: int) -> Optional[Alert]:
+        """Get an alert by ID"""
+        with self.get_session() as session:
+            return session.execute(
+                select(Alert).where(Alert.id == alert_id)
+            ).scalars().first()
+
+    def toggle_alert(self, alert_id: int) -> Optional[Alert]:
+        """Toggle alert enabled state"""
+        with self.get_session() as session:
+            alert = session.execute(
+                select(Alert).where(Alert.id == alert_id)
+            ).scalars().first()
+            if not alert:
+                return None
+            alert.enabled = 0 if alert.enabled else 1
+            alert.updated_at = datetime.now()
+            session.commit()
+            session.refresh(alert)
+            return alert
+
+    def delete_alert(self, alert_id: int) -> bool:
+        """Delete an alert by ID"""
+        with self.get_session() as session:
+            alert = session.execute(
+                select(Alert).where(Alert.id == alert_id)
+            ).scalars().first()
+            if not alert:
+                return False
+            session.delete(alert)
+            session.commit()
+            return True
+
 
 class AnalysisHistory(Base):
     """
@@ -916,35 +1110,65 @@ class Market(Base):
             'price': self.price,
             'change_pct': self.change_pct,
             'volume': self.volume,
-            'volume_display': self._format_volume_display(),
+            'volume_display': format_volume_display(self.volume, self.code),
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
 
-    def _format_volume_display(self) -> str:
-        """Format volume for display based on market type"""
-        if self.volume is None:
-            return '---'
-        try:
-            v = float(self.volume)
-            code = self.code or ''
-            # A股/港股 use 万 (ten thousands)
-            if code.startswith('hk') or (len(code) == 6 and code.isdigit() and not code.startswith('9')):
-                if v >= 100000000:
-                    return f"{v/100000000:.1f}亿"
-                elif v >= 10000:
-                    return f"{v/10000:.0f}万"
-                return f"{v:.0f}"
-            else:
-                # US stocks use M/B notation
-                if v >= 1000000000:
-                    return f"{v/1000000000:.1f}B"
-                elif v >= 1000000:
-                    return f"{v/1000000:.1f}M"
-                elif v >= 1000:
-                    return f"{v/1000:.1f}K"
-                return f"{v:.0f}"
-        except (ValueError, TypeError):
-            return '---'
+
+def format_volume_display(volume: float, code: str) -> str:
+    """Format volume for display based on market type.
+
+    A股/港股: >=1万 显示 "X.XX万"
+    美股: 显示 "X.XXM" / "X.XXK"
+    """
+    if volume is None:
+        return '---'
+    try:
+        v = float(volume)
+        # A股/港股 use 万 (ten thousands)
+        if code.startswith('hk') or (len(code) == 6 and code.isdigit() and not code.startswith('9')):
+            if v >= 100000000:
+                return f"{v/100000000:.1f}亿"
+            elif v >= 10000:
+                return f"{v/10000:.0f}万"
+            return f"{v:.0f}"
+        else:
+            # US stocks use M/B notation
+            if v >= 1000000000:
+                return f"{v/1000000000:.1f}B"
+            elif v >= 1000000:
+                return f"{v/1000000:.1f}M"
+            elif v >= 1000:
+                return f"{v/1000:.1f}K"
+            return f"{v:.0f}"
+    except (ValueError, TypeError):
+        return '---'
+
+
+class Alert(Base):
+    """告警配置模型"""
+    __tablename__ = 'alerts'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    stock = Column(String(10), nullable=False)
+    condition = Column(String(20), nullable=False)  # price_above, price_below
+    threshold = Column(Float, nullable=False)
+    channel = Column(String(20), default='wechat')  # wechat, feishu, telegram, email
+    enabled = Column(Integer, default=1)  # 1=enabled, 0=disabled
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'id': self.id,
+            'stock': self.stock,
+            'condition': self.condition,
+            'threshold': self.threshold,
+            'channel': self.channel,
+            'enabled': bool(self.enabled),
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
 
 
 # 便捷函数

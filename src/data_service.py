@@ -4,19 +4,30 @@ import sys
 import logging
 import threading
 import uuid
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime, date
 from typing import Dict, Any, List, Optional, Callable
 
 import sqlite3
 from .config import get_config
 from .alert_service import AlertService
-from .storage import get_db
+from .storage import get_db, get_market_cache
 
 logger = logging.getLogger(__name__)
 
+# ============================================================
+# Request Timeout and Thread Pool Configuration
+# ============================================================
+REQUEST_TIMEOUT_SECONDS = 30  # Default timeout per request
+MAX_CONCURRENT_REQUESTS = 5   # Max concurrent requests
+HEARTBEAT_INTERVAL = 30        # Seconds between heartbeats
 
-# Action handler type: takes request dict, returns response dict
-ActionHandler = Callable[[Dict[str, Any]], Dict[str, Any]]
+# ============================================================
+# Auto-Restart Configuration
+# ============================================================
+MAX_RESTARTS_PER_HOUR = 3     # Max restarts per hour to prevent tight loops
+RESTART_COOLDOWN_SECONDS = 60  # Cooldown between restart attempts
 
 
 class DataService:
@@ -25,6 +36,12 @@ class DataService:
 
     使用 action registry 模式分发请求到各 handler。
     每个 handler 是类的一个方法，接受 request dict，返回 response dict。
+
+    错误恢复增强：
+    1. Per-Request Timeout: 每个请求在 ThreadPoolExecutor 中执行，30秒超时
+    2. Network Degradation Fallback: 网络失败时回退到 SQLite 缓存
+    3. AI API Retry: 带指数退避的 429 重试
+    4. Auto-Restart: 崩溃后自动重启（通过外部 watchdog）
     """
 
     def __init__(self):
@@ -33,6 +50,9 @@ class DataService:
         # Initialize database via storage.py (ensures schema tables exist)
         get_db()
         self._alert_service = AlertService()
+
+        # === Thread Pool for concurrent request handling ===
+        self._executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_REQUESTS)
 
         # === Action Registry ===
         # 映射 action name -> handler method name
@@ -56,6 +76,10 @@ class DataService:
             "get_institutional": "_handle_get_institutional",
             "get_dragon_board": "_handle_get_dragon_board",
             "run_backtest": "_handle_run_backtest",
+            "get_alerts": "_handle_get_alerts",
+            "save_alert": "_handle_save_alert",
+            "delete_alert": "_handle_delete_alert",
+            "toggle_alert": "_handle_toggle_alert",
             "quit": "_handle_quit",
         }
 
@@ -64,7 +88,7 @@ class DataService:
         self._tasks_lock = threading.Lock()
 
     def _handle_request(self, req: Dict[str, Any]) -> Dict[str, Any]:
-        """根据 action 分发到对应 handler"""
+        """根据 action 分发到对应 handler with timeout protection"""
         action = req.get("action", "")
 
         if action not in self._actions:
@@ -72,7 +96,19 @@ class DataService:
 
         handler_name = self._actions[action]
         handler: ActionHandler = getattr(self, handler_name)
-        return handler(req)
+
+        # Submit to thread pool with timeout
+        timeout = req.get("_timeout", REQUEST_TIMEOUT_SECONDS)
+        future = self._executor.submit(handler, req)
+
+        try:
+            return future.result(timeout=timeout)
+        except FuturesTimeoutError:
+            logger.warning(f"请求 {action} 超时（{timeout}秒）")
+            return {"status": "error", "message": f"请求超时（{timeout}秒）"}
+        except Exception as e:
+            logger.error(f"处理请求 {action} 时发生异常: {e}")
+            return {"status": "error", "message": str(e)}
 
     # === Existing Handlers ===
 
@@ -570,6 +606,78 @@ class DataService:
             logger.error(f"回测失败 [{code}]: {e}")
             return {"status": "error", "message": f"回测失败: {str(e)}"}
 
+    # === Alert Handlers ===
+
+    def _handle_get_alerts(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """获取所有告警配置"""
+        try:
+            db = get_db()
+            alerts = db.get_alerts()
+            return {"status": "ok", "alerts": [a.to_dict() for a in alerts]}
+        except Exception as e:
+            logger.error(f"获取告警失败: {e}")
+            return {"status": "error", "message": f"获取告警失败: {str(e)}"}
+
+    def _handle_save_alert(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """创建新告警"""
+        stock = req.get("stock")
+        condition = req.get("condition")
+        threshold = req.get("threshold")
+        channel = req.get("channel", "wechat")
+
+        if not stock:
+            return {"status": "error", "message": "缺少 stock 参数"}
+        if not condition:
+            return {"status": "error", "message": "缺少 condition 参数"}
+        if threshold is None:
+            return {"status": "error", "message": "缺少 threshold 参数"}
+
+        try:
+            db = get_db()
+            alert = db.save_alert(
+                stock=stock,
+                condition=condition,
+                threshold=float(threshold),
+                channel=channel,
+                enabled=True,
+            )
+            return {"status": "ok", "alert": alert.to_dict()}
+        except Exception as e:
+            logger.error(f"保存告警失败: {e}")
+            return {"status": "error", "message": f"保存告警失败: {str(e)}"}
+
+    def _handle_delete_alert(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """删除告警"""
+        alert_id = req.get("id")
+        if alert_id is None:
+            return {"status": "error", "message": "缺少 id 参数"}
+
+        try:
+            db = get_db()
+            success = db.delete_alert(int(alert_id))
+            if success:
+                return {"status": "ok", "message": "告警已删除"}
+            return {"status": "error", "message": f"告警 {alert_id} 不存在"}
+        except Exception as e:
+            logger.error(f"删除告警失败: {e}")
+            return {"status": "error", "message": f"删除告警失败: {str(e)}"}
+
+    def _handle_toggle_alert(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """切换告警启用状态"""
+        alert_id = req.get("id")
+        if alert_id is None:
+            return {"status": "error", "message": "缺少 id 参数"}
+
+        try:
+            db = get_db()
+            alert = db.toggle_alert(int(alert_id))
+            if alert:
+                return {"status": "ok", "alert": alert.to_dict()}
+            return {"status": "error", "message": f"告警 {alert_id} 不存在"}
+        except Exception as e:
+            logger.error(f"切换告警失败: {e}")
+            return {"status": "error", "message": f"切换告警失败: {str(e)}"}
+
     def _handle_screen_stocks(self, req: Dict[str, Any]) -> Dict[str, Any]:
         """股票筛选器 - 根据条件筛选股票"""
         try:
@@ -823,20 +931,210 @@ class DataService:
         except Exception as e:
             logger.error(f"发送异动提醒异常 [{market['code']}]: {e}")
 
-    def run(self):
-        """主循环：读取 stdin，处理请求"""
-        while self._running:
-            line = sys.stdin.readline()
-            if not line:
-                break
+    # ============================================================
+    # Network Degradation Fallback
+    # ============================================================
+
+    def _fetch_with_fallback(self, code: str, fetch_fn: callable) -> Dict[str, Any]:
+        """
+        尝试获取数据，失败时回退到缓存
+
+        Args:
+            code: 股票代码
+            fetch_fn: 获取数据的函数，签名 () -> Dict[str, Any]
+
+        Returns:
+            (data, is_cached, is_stale, cache_age)
+        """
+        cache = get_market_cache()
+
+        try:
+            # 尝试获取实时数据
+            data = fetch_fn()
+
+            # 保存到缓存
+            if data and data.get("price"):
+                cache.set(code, data, data.get("_source", "unknown"))
+
+            return data, False, False, 0
+
+        except Exception as e:
+            logger.warning(f"获取 {code} 数据失败，尝试缓存 fallback: {e}")
+
+            # 尝试从缓存获取
+            cached_data, is_stale, age = cache.get_with_staleness(code)
+
+            if cached_data:
+                logger.info(f"使用缓存数据 for {code} (age: {age:.0f}s, stale: {is_stale})")
+                return cached_data, True, is_stale, age
+            else:
+                # 没有缓存数据
+                raise Exception(f"无法获取 {code} 数据，且无缓存可用")
+
+    def _fetch_market_data(self, code: str) -> Dict[str, Any]:
+        """使用降级策略获取市场数据"""
+        from data_provider.efinance_fetcher import EfinanceFetcher
+
+        def fetch_live():
+            fetcher = EfinanceFetcher()
+            df = fetcher.get_daily_data(code, days=1)
+            if df is None or len(df) == 0:
+                raise Exception("No data returned")
+            latest = df.iloc[-1]
+            return {
+                "code": code,
+                "name": latest.get("name", ""),
+                "price": latest.get("close", 0),
+                "change_pct": latest.get("pct_chg", 0),
+                "volume": latest.get("volume", 0),
+                "_source": "EfinanceFetcher",
+            }
+
+        data, is_cached, is_stale, cache_age = self._fetch_with_fallback(code, fetch_live)
+
+        if is_cached and is_stale:
+            data["_warning"] = f"数据可能过时（缓存于 {cache_age:.0f}秒前）"
+
+        return data
+
+    # ============================================================
+    # AI API 429 Retry with Circuit Breaker
+    # ============================================================
+
+    # AI API circuit breaker state
+    _ai_provider_state = {
+        "429_count": 0,
+        "last_429_time": 0,
+        "disabled_until": 0,  # Unix timestamp when re-enable
+        "current_provider": "gemini",
+    }
+
+    def _analyze_with_retry(self, code: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        AI 分析带指数退避重试和 circuit breaker
+
+        策略：
+        1. 429 时指数退避：60s -> 300s -> ...
+        2. 连续 3 次 429 后禁用 provider 30 分钟
+        3. retry_count 记录重试次数
+        """
+        from src.analyzer import GeminiAnalyzer
+
+        state = self._ai_provider_state
+        now = time.time()
+
+        # 检查 provider 是否被禁用
+        if state["disabled_until"] > now:
+            wait_time = state["disabled_until"] - now
+            logger.warning(f"AI provider 已被禁用，还需等待 {wait_time:.0f}秒")
+            return {
+                "status": "error",
+                "message": f"AI provider 限流中，请等待 {wait_time:.0f}秒",
+                "retry_count": 0,
+            }
+
+        analyzer = GeminiAnalyzer()
+        max_retries = 5
+
+        for attempt in range(max_retries):
             try:
-                req = json.loads(line)
-                resp = self._handle_request(req)
-                self._send(resp)
-            except json.JSONDecodeError:
-                self._send({"status": "error", "message": "invalid json"})
+                result = analyzer.analyze(context, news_context=None)
+
+                # 成功后重置 429 计数
+                state["429_count"] = 0
+
+                return {
+                    "status": "ok" if result.success else "error",
+                    "data": result.to_dict() if result.success else None,
+                    "error_message": result.error_message,
+                    "retry_count": attempt,
+                    "provider": state["current_provider"],
+                }
+
             except Exception as e:
-                self._send({"status": "error", "message": str(e)})
+                error_str = str(e)
+                is_429 = "429" in error_str or "rate" in error_str.lower() or "quota" in error_str.lower()
+
+                if is_429:
+                    state["429_count"] += 1
+                    state["last_429_time"] = now
+
+                    # 连续 3 次 429，启用 circuit breaker
+                    if state["429_count"] >= 3:
+                        state["disabled_until"] = now + 1800  # 30 minutes
+                        logger.error(f"AI API 连续 429，禁用 30 分钟")
+                        return {
+                            "status": "error",
+                            "message": "AI provider 限流严重，30分钟内不可用",
+                            "retry_count": attempt,
+                            "429_count": state["429_count"],
+                        }
+
+                    # 指数退避：60s, 300s, 600s, ...
+                    if attempt == 0:
+                        wait_time = 60
+                    elif attempt == 1:
+                        wait_time = 300
+                    else:
+                        wait_time = min(600, 60 * (2 ** attempt))
+
+                    logger.warning(f"AI API 429，第 {attempt + 1} 次重试，等待 {wait_time}秒")
+                    time.sleep(wait_time)
+                else:
+                    # 非 429 错误，直接抛出
+                    raise
+
+        # 所有重试都失败
+        return {
+            "status": "error",
+            "message": f"AI 分析失败，已重试 {max_retries} 次",
+            "retry_count": max_retries,
+        }
+
+    # ============================================================
+    # Heartbeat for Watchdog
+    # ============================================================
+
+    def _send_heartbeat(self):
+        """发送心跳信号（用于外部 watchdog 检测）"""
+        self._send({
+            "type": "heartbeat",
+            "timestamp": datetime.now().isoformat(),
+            "running": self._running,
+        })
+
+    # ============================================================
+    # Main Run Loop
+    # ============================================================
+
+    def run(self):
+        """主循环：读取 stdin，处理请求，发送心跳"""
+        last_heartbeat = time.time()
+        heartbeat_interval = HEARTBEAT_INTERVAL
+
+        while self._running:
+            # 计算距上次心跳的时间
+            elapsed = time.time() - last_heartbeat
+
+            # 发送心跳（每 HEARTBEAT_INTERVAL 秒）
+            if elapsed >= heartbeat_interval:
+                self._send_heartbeat()
+                last_heartbeat = time.time()
+
+            # 使用非阻塞方式读取 stdin（设置超时避免 busy loop）
+            import select
+            if select.select([sys.stdin], [], [], 0.5)[0]:
+                line = sys.stdin.readline()
+                if not line:
+                    break
+                try:
+                    req = json.loads(line)
+                    resp = self._handle_request(req)
+                    self._send(resp)
+                except json.JSONDecodeError:
+                    self._send({"status": "error", "message": "invalid json"})
+                except Exception as e:
+                    self._send({"status": "error", "message": str(e)})
 
 if __name__ == "__main__":
     service = DataService()

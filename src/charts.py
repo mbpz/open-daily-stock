@@ -44,6 +44,36 @@ _DEFAULT_MA_PERIODS = [5, 10, 20]
 CHART_CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "charts_cache")
 
 
+def format_volume(volume: float, code: str) -> str:
+    """Format volume for display based on market type.
+
+    A股/港股: >=1万 显示 "X.XX万"
+    美股: 显示 "X.XXM" / "X.XXK"
+    """
+    if volume is None:
+        return '---'
+    try:
+        v = float(volume)
+        # A股/港股 use 万 (ten thousands)
+        if code.startswith('hk') or (len(code) == 6 and code.isdigit() and not code.startswith('9')):
+            if v >= 100000000:
+                return f"{v/100000000:.1f}亿"
+            elif v >= 10000:
+                return f"{v/10000:.0f}万"
+            return f"{v:.0f}"
+        else:
+            # US stocks use M/B notation
+            if v >= 1000000000:
+                return f"{v/1000000000:.1f}B"
+            elif v >= 1000000:
+                return f"{v/1000000:.1f}M"
+            elif v >= 1000:
+                return f"{v/1000:.1f}K"
+            return f"{v:.0f}"
+    except (ValueError, TypeError):
+        return '---'
+
+
 def convert_history_to_df(history_data: List[Dict[str, Any]]) -> Optional[pd.DataFrame]:
     """
     将历史数据 dict 列表转换为 mplfinance 所需的 DataFrame 格式。
@@ -107,144 +137,50 @@ def add_ma_indicators(df: pd.DataFrame, ma_periods: List[int] = None) -> pd.Data
 
 
 # === Technical Indicator Calculations ===
+# Import from shared package for TUI/GUI code reuse
+from src.shared.indicators import (
+    calculate_rsi as _calc_rsi,
+    calculate_macd as _calc_macd,
+    calculate_bollinger_bands as _calc_bollinger,
+    calculate_kdj as _calc_kdj,
+    calculate_wr as _calc_wr,
+    calculate_obv as _calc_obv,
+)
+
 
 def calculate_rsi(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    """
-    计算 RSI (Relative Strength Index) 相对强弱指数。
-
-    Args:
-        df: OHLCV DataFrame
-        period: 计算周期，默认14
-
-    Returns:
-        RSI Series
-    """
-    delta = df["Close"].diff()
-    gain = delta.where(delta > 0, 0.0)
-    loss = (-delta).where(delta < 0, 0.0)
-
-    avg_gain = gain.rolling(window=period).mean()
-    avg_loss = loss.rolling(window=period).mean()
-
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+    """Calculate RSI (Relative Strength Index)."""
+    return _calc_rsi(df["Close"], period)
 
 
 def calculate_macd(df: pd.DataFrame, fast: int = 12, slow: int = 26, signal: int = 9) -> pd.DataFrame:
-    """
-    计算 MACD (Moving Average Convergence Divergence) 指数平滑异同移动平均线。
-
-    Args:
-        df: OHLCV DataFrame
-        fast: 快线周期，默认12
-        slow: 慢线周期，默认26
-        signal: 信号线周期，默认9
-
-    Returns:
-        包含 MACD、DIF、DEA 列的 DataFrame
-    """
-    ema_fast = df["Close"].ewm(span=fast, adjust=False).mean()
-    ema_slow = df["Close"].ewm(span=slow, adjust=False).mean()
-
-    dif = ema_fast - ema_slow
-    dea = dif.ewm(span=signal, adjust=False).mean()
-    macd = (dif - dea) * 2  # MACD 柱状图 = (DIF - DEA) * 2
-
-    result = pd.DataFrame({"MACD": macd, "DIF": dif, "DEA": dea}, index=df.index)
-    return result
+    """Calculate MACD (matches original charts.py convention)."""
+    macd_line, signal_line, histogram = _calc_macd(df["Close"], fast, slow, signal)
+    # Original convention: MACD = (DIF - DEA) * 2
+    macd_histogram = (macd_line - signal_line) * 2
+    return pd.DataFrame({"MACD": macd_histogram, "DIF": macd_line, "DEA": signal_line}, index=df.index)
 
 
 def calculate_bollinger_bands(df: pd.DataFrame, period: int = 20, std_dev: float = 2.0) -> pd.DataFrame:
-    """
-    计算 Bollinger Bands 布林带指标。
-
-    Args:
-        df: OHLCV DataFrame
-        period: 周期，默认20
-        std_dev: 标准差倍数，默认2.0
-
-    Returns:
-        包含 BB_UPPER、BB_MIDDLE、BB_LOWER 列的 DataFrame
-    """
-    middle = df["Close"].rolling(window=period).mean()
-    std = df["Close"].rolling(window=period).std()
-
-    upper = middle + std_dev * std
-    lower = middle - std_dev * std
-
-    result = pd.DataFrame({"BB_UPPER": upper, "BB_MIDDLE": middle, "BB_LOWER": lower}, index=df.index)
-    return result
+    """Calculate Bollinger Bands."""
+    upper, middle, lower = _calc_bollinger(df["Close"], period, std_dev)
+    return pd.DataFrame({"BB_UPPER": upper, "BB_MIDDLE": middle, "BB_LOWER": lower}, index=df.index)
 
 
 def calculate_kdj(df: pd.DataFrame, period: int = 9, smooth_k: int = 3, smooth_d: int = 3) -> pd.DataFrame:
-    """
-    计算 KDJ 随机指标。
-
-    Args:
-        df: OHLCV DataFrame
-        period: RSV 周期，默认9
-        smooth_k: K 值平滑因子，默认3
-        smooth_d: D 值平滑因子，默认3
-
-    Returns:
-        包含 K、D、J 列的 DataFrame
-    """
-    low_n = df["Low"].rolling(window=period).min()
-    high_n = df["High"].rolling(window=period).max()
-
-    rsv = (df["Close"] - low_n) / (high_n - low_n) * 100
-    rsv = rsv.fillna(50)
-
-    k = rsv.ewm(span=smooth_k, adjust=False, min_periods=smooth_k - 1).mean()
-    d = k.ewm(span=smooth_d, adjust=False, min_periods=smooth_d - 1).mean()
-    j = 3 * k - 2 * d
-
-    result = pd.DataFrame({"K": k, "D": d, "J": j}, index=df.index)
-    return result
+    """Calculate KDJ."""
+    k, d, j = _calc_kdj(df["High"], df["Low"], df["Close"], period, smooth_k, smooth_d)
+    return pd.DataFrame({"K": k, "D": d, "J": j}, index=df.index)
 
 
 def calculate_wr(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    """
-    计算 WR (Williams %R) 威廉指标。
-
-    Args:
-        df: OHLCV DataFrame
-        period: 周期，默认14
-
-    Returns:
-        WR Series
-    """
-    high_n = df["High"].rolling(window=period).max()
-    low_n = df["Low"].rolling(window=period).min()
-
-    wr = (high_n - df["Close"]) / (high_n - low_n) * -100
-    return wr
+    """Calculate WR."""
+    return _calc_wr(df["High"], df["Low"], df["Close"], period)
 
 
 def calculate_obv(df: pd.DataFrame) -> pd.Series:
-    """
-    计算 OBV (On-Balance Volume) 能量潮指标。
-
-    Args:
-        df: OHLCV DataFrame
-
-    Returns:
-        OBV Series
-    """
-    price_change = df["Close"].diff()
-    obv = pd.Series(index=df.index, dtype=float)
-    obv.iloc[0] = 0.0
-
-    for i in range(1, len(df)):
-        if price_change.iloc[i] > 0:
-            obv.iloc[i] = obv.iloc[i - 1] + df["Volume"].iloc[i]
-        elif price_change.iloc[i] < 0:
-            obv.iloc[i] = obv.iloc[i - 1] - df["Volume"].iloc[i]
-        else:
-            obv.iloc[i] = obv.iloc[i - 1]
-
-    return obv
+    """Calculate OBV."""
+    return _calc_obv(df["Close"], df["Volume"])
 
 
 def add_indicators(df: pd.DataFrame, indicator_names: List[str]) -> pd.DataFrame:
