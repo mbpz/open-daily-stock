@@ -163,13 +163,50 @@ class DataService:
         return {"status": "error", "message": "not implemented yet"}
 
     def _handle_get_tasks(self, req: Dict[str, Any]) -> Dict[str, Any]:
-        return {"status": "error", "message": "not implemented yet"}
+        """获取所有任务列表"""
+        with self._tasks_lock:
+            tasks = []
+            for task_id, task in self._tasks.items():
+                tasks.append({
+                    "task_id": task_id,
+                    "code": task["code"],
+                    "status": task["status"],
+                    "created_at": task["created_at"],
+                    "completed_at": task.get("completed_at"),
+                })
+            # 按时间倒序
+            tasks.sort(key=lambda x: x["created_at"], reverse=True)
+        return {"status": "ok", "tasks": tasks}
 
     def _handle_get_task(self, req: Dict[str, Any]) -> Dict[str, Any]:
-        return {"status": "error", "message": "not implemented yet"}
+        """获取单个任务详情"""
+        task_id = req.get("task_id")
+        if not task_id:
+            return {"status": "error", "message": "缺少 task_id 参数"}
+
+        with self._tasks_lock:
+            if task_id not in self._tasks:
+                return {"status": "error", "message": f"任务 {task_id} 不存在"}
+
+            task = self._tasks[task_id]
+        return {"status": "ok", "task": task}
 
     def _handle_cancel_task(self, req: Dict[str, Any]) -> Dict[str, Any]:
-        return {"status": "error", "message": "not implemented yet"}
+        """取消任务"""
+        task_id = req.get("task_id")
+        if not task_id:
+            return {"status": "error", "message": "缺少 task_id 参数"}
+
+        with self._tasks_lock:
+            if task_id not in self._tasks:
+                return {"status": "error", "message": f"任务 {task_id} 不存在"}
+
+            task = self._tasks[task_id]
+            if task["status"] in ["completed", "failed", "cancelled"]:
+                return {"status": "error", "message": f"任务已 {task['status']}，无法取消"}
+
+            task["status"] = "cancelled"
+        return {"status": "ok", "message": "任务已取消"}
 
     # === Existing Helper Methods ===
 

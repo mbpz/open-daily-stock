@@ -110,3 +110,46 @@ class TestAnalyzeAction:
         assert task_id in service._tasks
         assert service._tasks[task_id]["code"] == "600519"
         assert service._tasks[task_id]["status"] in ["pending", "running"]
+
+
+class TestTaskManagementActions:
+    def test_get_tasks_returns_list(self):
+        from src.data_service import DataService
+        service = DataService()
+        # First create a task
+        service._handle_request({"action": "analyze", "code": "600519"})
+        result = service._handle_request({"action": "get_tasks"})
+        assert result["status"] == "ok"
+        assert "tasks" in result
+        assert isinstance(result["tasks"], list)
+        assert len(result["tasks"]) >= 1
+
+    def test_get_task_returns_specific_task(self):
+        from src.data_service import DataService
+        service = DataService()
+        # Create task
+        create_result = service._handle_request({"action": "analyze", "code": "600519"})
+        task_id = create_result["task_id"]
+        # Get specific task
+        result = service._handle_request({"action": "get_task", "task_id": task_id})
+        assert result["status"] == "ok"
+        assert result["task"]["task_id"] == task_id
+
+    def test_get_task_not_found(self):
+        from src.data_service import DataService
+        service = DataService()
+        result = service._handle_request({"action": "get_task", "task_id": "nonexistent"})
+        assert result["status"] == "error"
+        # Accept both English "not found" and Chinese "不存在"
+        assert "not found" in result["message"].lower() or "不存在" in result["message"]
+
+    def test_cancel_task_marks_as_cancelled(self):
+        from src.data_service import DataService
+        service = DataService()
+        # Create task
+        create_result = service._handle_request({"action": "analyze", "code": "600519"})
+        task_id = create_result["task_id"]
+        # Cancel it
+        result = service._handle_request({"action": "cancel_task", "task_id": task_id})
+        assert result["status"] == "ok"
+        assert service._tasks[task_id]["status"] == "cancelled"
