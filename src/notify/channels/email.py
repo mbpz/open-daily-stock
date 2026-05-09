@@ -52,15 +52,27 @@ class EmailChannel(BaseChannel):
             msg.attach(html_part)
 
             # 发送邮件
-            with smtplib.SMTP_SSL(smtp_config["server"], smtp_config["port"]) as server:
-                server.login(self.sender, self.password)
-                server.sendmail(self.sender, self.receivers or [self.sender], msg.as_string())
+            timeout = 30  # 30 second timeout
+            if smtp_config["ssl"]:
+                # Port 465: SSL
+                with smtplib.SMTP_SSL(smtp_config["server"], smtp_config["port"], timeout=timeout) as server:
+                    server.login(self.sender, self.password)
+                    server.sendmail(self.sender, self.receivers or [self.sender], msg.as_string())
+            else:
+                # Port 587: TLS
+                with smtplib.SMTP(smtp_config["server"], smtp_config["port"], timeout=timeout) as server:
+                    server.starttls()
+                    server.login(self.sender, self.password)
+                    server.sendmail(self.sender, self.receivers or [self.sender], msg.as_string())
 
             return ChannelResult(success=True, channel=self.name, message="邮件已发送")
 
         except smtplib.SMTPAuthError:
             logger.error("邮件认证失败")
             return ChannelResult(success=False, channel=self.name, error="邮件认证失败")
+        except smtplib.SMTPConnectError:
+            logger.error("邮件连接失败")
+            return ChannelResult(success=False, channel=self.name, error="邮件连接失败")
         except Exception as e:
             logger.error(f"邮件发送异常: {e}")
             return ChannelResult(success=False, channel=self.name, error=str(e))
