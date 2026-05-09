@@ -91,14 +91,20 @@ stdio JSON    stdio JSON
   - 行情历史表（用于 K 线回放）
   - 任务状态持久化
 
-- [ ] **P1-2: TUI/GUI 代码复用**
-  - 抽取公共组件到 `shared/` 目录
-  - 减少重复开发
+- [x] **P1-2: TUI/GUI 代码复用** ✅
+  - `src/shared/` 包：style.py / market_status.py / indicators.py
+  - Indicators 迁移到 shared 包，charts.py 委托调用
+  - `get_market_status()` 支持 A股/港股/美股交易时间判断
+  - `format_volume()` / `format_percent()` 等格式化函数统一复用
 
-- [ ] **P1-3: 错误恢复增强**
-  - DataService 崩溃后自动重启
-  - 网络异常时本地缓存降级
-  - AI API 429 限流自适应
+- [x] **P1-3: 错误恢复增强** ✅
+  - `MarketDataCache` TTL 缓存 (A股 1天/港美股 1小时)
+  - ThreadPoolExecutor per-request timeout (30s)
+  - AI API 429 指数退避 (60s → 300s → 600s)
+  - 3次连续429后熔断30分钟
+  - 网络降级: live失败 → 缓存数据 + 警告
+  - 心跳 watchdog (30s 间隔)
+  - 16 个新测试
 
 - [x] **P1-4: 持仓成本管理** ✅
   - `src/portfolio.py` — Position dataclass + 成本盈亏计算
