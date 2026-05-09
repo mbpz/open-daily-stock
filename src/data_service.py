@@ -3,6 +3,7 @@ import json
 import sys
 import sqlite3
 import logging
+import threading
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Callable
 
@@ -47,6 +48,7 @@ class DataService:
 
         # Task storage for async operations
         self._tasks: Dict[str, Dict[str, Any]] = {}
+        self._tasks_lock = threading.Lock()
 
     def _handle_request(self, req: Dict[str, Any]) -> Dict[str, Any]:
         """根据 action 分发到对应 handler"""
@@ -97,17 +99,17 @@ class DataService:
         task_id = f"task_{len(self._tasks) + 1}_{code}_{int(datetime.now().timestamp())}"
 
         # 创建任务记录
-        self._tasks[task_id] = {
-            "task_id": task_id,
-            "code": code,
-            "status": "pending",
-            "created_at": datetime.now().isoformat(),
-            "result": None,
-            "error": None,
-        }
+        with self._tasks_lock:
+            self._tasks[task_id] = {
+                "task_id": task_id,
+                "code": code,
+                "status": "pending",
+                "created_at": datetime.now().isoformat(),
+                "result": None,
+                "error": None,
+            }
 
         # 异步执行分析（不阻塞 DataService）
-        import threading
         thread = threading.Thread(target=self._run_analyze_task, args=(task_id, code))
         thread.daemon = True
         thread.start()
@@ -117,7 +119,8 @@ class DataService:
     def _run_analyze_task(self, task_id: str, code: str):
         """后台执行 AI 分析"""
         try:
-            self._tasks[task_id]["status"] = "running"
+            with self._tasks_lock:
+                self._tasks[task_id]["status"] = "running"
 
             # 获取分析上下文
             from src.storage import get_analysis_context
@@ -129,17 +132,19 @@ class DataService:
             result = analyzer.analyze(context)
 
             # 保存结果
-            self._tasks[task_id]["status"] = "completed"
-            self._tasks[task_id]["result"] = result.to_dict()
-            self._tasks[task_id]["completed_at"] = datetime.now().isoformat()
+            with self._tasks_lock:
+                self._tasks[task_id]["status"] = "completed"
+                self._tasks[task_id]["result"] = result.to_dict()
+                self._tasks[task_id]["completed_at"] = datetime.now().isoformat()
 
             # 发送通知
             self._send_analysis_notification(code, result)
 
         except Exception as e:
             logger.error(f"AI 分析失败 [{code}]: {e}")
-            self._tasks[task_id]["status"] = "failed"
-            self._tasks[task_id]["error"] = str(e)
+            with self._tasks_lock:
+                self._tasks[task_id]["status"] = "failed"
+                self._tasks[task_id]["error"] = str(e)
 
     def _send_analysis_notification(self, code: str, result):
         """发送分析完成通知"""
