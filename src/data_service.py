@@ -192,7 +192,34 @@ class DataService:
             return {"status": "error", "message": f"获取历史数据失败: {str(e)}"}
 
     def _handle_search_news(self, req: Dict[str, Any]) -> Dict[str, Any]:
-        return {"status": "error", "message": "not implemented yet"}
+        """搜索股票相关新闻"""
+        code = req.get("code")
+        if not code:
+            return {"status": "error", "message": "缺少股票代码 code 参数"}
+
+        try:
+            from src.search_service import SearchService
+            from src.config import get_config
+
+            config = get_config()
+            search_service = SearchService(
+                bocha_keys=config.bocha_api_keys,
+                tavily_keys=config.tavily_api_keys,
+                serpapi_keys=config.serpapi_keys
+            )
+
+            # 获取股票名称
+            from src.analyzer import STOCK_NAME_MAP
+            name = STOCK_NAME_MAP.get(code, code)
+
+            # 执行搜索
+            news_results = search_service.search_stock_news(code, name)
+
+            return {"status": "ok", "data": news_results.results}
+
+        except Exception as e:
+            logger.error(f"搜索新闻失败 [{code}]: {e}")
+            return {"status": "error", "message": f"搜索新闻失败: {str(e)}"}
 
     def _handle_get_tasks(self, req: Dict[str, Any]) -> Dict[str, Any]:
         """获取所有任务列表"""

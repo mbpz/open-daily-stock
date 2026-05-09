@@ -169,3 +169,19 @@ class TestTaskManagementActions:
         result = service._handle_request({"action": "cancel_task", "task_id": task_id})
         assert result["status"] == "ok"
         assert service._tasks[task_id]["status"] == "cancelled"
+
+
+class TestSearchNewsAction:
+    def test_search_news_returns_results(self):
+        from src.data_service import DataService
+        service = DataService()
+        result = service._handle_request({"action": "search_news", "code": "600519"})
+        assert result["status"] == "ok"
+        assert "data" in result
+        assert isinstance(result["data"], list)
+
+    def test_search_news_missing_code(self):
+        from src.data_service import DataService
+        service = DataService()
+        result = service._handle_request({"action": "search_news"})
+        assert result["status"] == "error"
