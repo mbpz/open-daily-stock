@@ -84,3 +84,29 @@ class TestDataServiceActionRegistry:
         from src.data_service import DataService
         service = DataService()
         assert hasattr(service, '_handle_get_tasks')
+
+
+class TestAnalyzeAction:
+    def test_analyze_returns_task_id(self):
+        from src.data_service import DataService
+        service = DataService()
+        result = service._handle_request({"action": "analyze", "code": "600519"})
+        assert result["status"] == "ok"
+        assert "task_id" in result
+        assert result["task_id"] is not None
+
+    def test_analyze_missing_code_returns_error(self):
+        from src.data_service import DataService
+        service = DataService()
+        result = service._handle_request({"action": "analyze"})
+        assert result["status"] == "error"
+        assert "code" in result["message"].lower()
+
+    def test_analyze_creates_task_in_tasks_dict(self):
+        from src.data_service import DataService
+        service = DataService()
+        result = service._handle_request({"action": "analyze", "code": "600519"})
+        task_id = result["task_id"]
+        assert task_id in service._tasks
+        assert service._tasks[task_id]["code"] == "600519"
+        assert service._tasks[task_id]["status"] in ["pending", "running"]

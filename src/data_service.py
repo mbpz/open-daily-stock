@@ -88,7 +88,68 @@ class DataService:
     # === Stub Handlers for New Actions ===
 
     def _handle_analyze(self, req: Dict[str, Any]) -> Dict[str, Any]:
-        return {"status": "error", "message": "not implemented yet"}
+        """触发 AI 分析任务"""
+        code = req.get("code")
+        if not code:
+            return {"status": "error", "message": "缺少股票代码 code 参数"}
+
+        # 生成 task_id
+        task_id = f"task_{len(self._tasks) + 1}_{code}_{int(datetime.now().timestamp())}"
+
+        # 创建任务记录
+        self._tasks[task_id] = {
+            "task_id": task_id,
+            "code": code,
+            "status": "pending",
+            "created_at": datetime.now().isoformat(),
+            "result": None,
+            "error": None,
+        }
+
+        # 异步执行分析（不阻塞 DataService）
+        import threading
+        thread = threading.Thread(target=self._run_analyze_task, args=(task_id, code))
+        thread.daemon = True
+        thread.start()
+
+        return {"status": "ok", "task_id": task_id, "message": "分析任务已创建"}
+
+    def _run_analyze_task(self, task_id: str, code: str):
+        """后台执行 AI 分析"""
+        try:
+            self._tasks[task_id]["status"] = "running"
+
+            # 获取分析上下文
+            from src.storage import get_analysis_context
+            context = get_analysis_context(code)
+
+            # 执行 AI 分析
+            from src.analyzer import GeminiAnalyzer
+            analyzer = GeminiAnalyzer()
+            result = analyzer.analyze(context)
+
+            # 保存结果
+            self._tasks[task_id]["status"] = "completed"
+            self._tasks[task_id]["result"] = result.to_dict()
+            self._tasks[task_id]["completed_at"] = datetime.now().isoformat()
+
+            # 发送通知
+            self._send_analysis_notification(code, result)
+
+        except Exception as e:
+            logger.error(f"AI 分析失败 [{code}]: {e}")
+            self._tasks[task_id]["status"] = "failed"
+            self._tasks[task_id]["error"] = str(e)
+
+    def _send_analysis_notification(self, code: str, result):
+        """发送分析完成通知"""
+        try:
+            from src.notification import NotificationService
+            notifier = NotificationService()
+            message = f"📊 {result.name}({code}) 分析完成: {result.operation_advice} (评分: {result.sentiment_score})"
+            notifier.send(message)
+        except Exception as e:
+            logger.warning(f"发送分析通知失败: {e}")
 
     def _handle_get_history(self, req: Dict[str, Any]) -> Dict[str, Any]:
         return {"status": "error", "message": "not implemented yet"}
