@@ -11,6 +11,7 @@ A股自选股智能分析系统 - 配置管理模块
 """
 
 import os
+import json
 from pathlib import Path
 from typing import Dict, List, Optional
 from dotenv import load_dotenv, dotenv_values
@@ -124,6 +125,43 @@ class Config:
     # === 语言配置 ===
     language: str = "zh_CN"  # 语言偏好: zh_CN 或 en_US
 
+    # === UI 配置 (config.json) ===
+    keybindings: Dict[str, Dict[str, str]] = field(default_factory=lambda: {
+        "global": {
+            "quit": "q",
+            "refresh": "r",
+            "help": "?",
+            "toggle_theme": "t",
+            "markets": "1",
+            "tasks": "2",
+            "analyze": "3",
+            "config": "4",
+            "logs": "5",
+            "next_module": "tab",
+        },
+        "markets": {
+            "move_up": "up",
+            "move_down": "down",
+            "select": "enter",
+            "back": "left",
+            "analyze": "a",
+            "add_watchlist": "w",
+            "screener": "s",
+            "export_csv": "e",
+        },
+        "analysis": {
+            "back": "left",
+            "toggle_detail": "d",
+            "copy_result": "c",
+        },
+        "tasks": {
+            "cancel": "c",
+            "view_result": "enter",
+            "back": "left",
+        },
+    })
+    theme: str = "dark"  # "dark" | "light"
+
     # === 技术指标配置 ===
     indicators: Dict[str, bool] = field(default_factory=lambda: {
         "ma": True,
@@ -135,6 +173,10 @@ class Config:
         "bollinger": False,
     })
 
+    # === K线画线工具配置 ===
+    chart_draw_support_resistance: bool = False
+    chart_draw_fibonacci: bool = False
+
     # === 定时任务配置 ===
     schedule_enabled: bool = False            # 是否启用定时任务
     schedule_time: str = "18:00"              # 每日推送时间（HH:MM 格式）
@@ -143,6 +185,12 @@ class Config:
     # === 定时刷新配置 ===
     schedule_refresh_enabled: bool = False
     schedule_refresh_time: str = "18:00"      # HH:MM format, daily refresh time
+
+    # === 数据源插件配置 ===
+    # 外部数据源插件列表，格式: ["module.ClassName", ...]
+    # 例如: ["wind.WindProvider", "dongcai.DongcaiProvider"]
+    # 插件模块需放在 data_provider/ 目录下，实现 DataProviderPlugin 接口
+    data_provider_plugins: List[str] = field(default_factory=list)
 
     # === 实时行情增强数据配置 ===
     # 实时行情开关（关闭后使用历史收盘价进行分析）
@@ -180,7 +228,12 @@ class Config:
     webui_enabled: bool = False
     webui_host: str = "127.0.0.1"
     webui_port: int = 8000
-    
+
+    # === WebSocket IPC 服务器配置 ===
+    ws_server_enabled: bool = False
+    ws_server_port: int = 9876
+    ws_server_host: str = "127.0.0.1"
+
     # === 机器人配置 ===
     bot_enabled: bool = True              # 是否启用机器人功能
     bot_command_prefix: str = "/"         # 命令前缀
@@ -212,6 +265,9 @@ class Config:
     
     # 单例实例存储
     _instance: Optional['Config'] = None
+
+    # JSON 配置文件路径（可被测试覆盖）
+    _json_path: Optional[Path] = None
     
     @classmethod
     def get_instance(cls) -> 'Config':
@@ -306,7 +362,7 @@ class Config:
         serpapi_keys_str = os.getenv('SERPAPI_API_KEYS', '')
         serpapi_keys = [k.strip() for k in serpapi_keys_str.split(',') if k.strip()]
         
-        return cls(
+        config = cls(
             stock_list=stock_list,
             feishu_app_id=os.getenv('FEISHU_APP_ID'),
             feishu_app_secret=os.getenv('FEISHU_APP_SECRET'),
@@ -361,6 +417,10 @@ class Config:
             webui_enabled=os.getenv('WEBUI_ENABLED', 'false').lower() == 'true',
             webui_host=os.getenv('WEBUI_HOST', '127.0.0.1'),
             webui_port=int(os.getenv('WEBUI_PORT', '8000')),
+            # WebSocket IPC 服务器配置
+            ws_server_enabled=os.getenv('WS_SERVER_ENABLED', 'false').lower() == 'true',
+            ws_server_port=int(os.getenv('WS_SERVER_PORT', '9876')),
+            ws_server_host=os.getenv('WS_SERVER_HOST', '127.0.0.1'),
             # 机器人配置
             bot_enabled=os.getenv('BOT_ENABLED', 'true').lower() == 'true',
             bot_command_prefix=os.getenv('BOT_COMMAND_PREFIX', '/'),
@@ -393,16 +453,87 @@ class Config:
             realtime_source_priority=os.getenv('REALTIME_SOURCE_PRIORITY', 'akshare_sina,tencent,efinance,akshare_em'),
             realtime_cache_ttl=int(os.getenv('REALTIME_CACHE_TTL', '600')),
             circuit_breaker_cooldown=int(os.getenv('CIRCUIT_BREAKER_COOLDOWN', '300')),
+            # 数据源插件配置
+            data_provider_plugins=[p.strip() for p in os.getenv('DATA_PROVIDER_PLUGINS', '').split(',') if p.strip()],
             # 行情异动提醒配置
             alerts_enabled=os.getenv('ALERTS_ENABLED', 'false').lower() == 'true',
             alerts_threshold_pct=float(os.getenv('ALERTS_THRESHOLD_PCT', '5.0')),
             language=os.getenv('LANGUAGE', 'zh_CN')
         )
+        # 从 config.json 加载 UI 配置（keybindings, theme）
+        cls.load_json_config(config)
+        return config
     
     @classmethod
     def reset_instance(cls) -> None:
         """重置单例（主要用于测试）"""
         cls._instance = None
+
+    @classmethod
+    def _get_json_path(cls) -> Path:
+        """Get config.json file path."""
+        if cls._json_path:
+            return cls._json_path
+        return Path(__file__).parent.parent / "config.json"
+
+    @classmethod
+    def load_json_config(cls, config: 'Config') -> 'Config':
+        """
+        Load UI config from config.json and apply to Config instance.
+
+        从 config.json 加载 UI 相关配置（keybindings, theme 等），
+        如果文件不存在或字段缺失则使用默认值（向后兼容）。
+
+        向后兼容：自动将旧版 flat keybindings (key->action) 迁移为
+        新版 nested keybindings (section->{action->key})。
+        """
+        json_path = cls._get_json_path()
+        try:
+            if json_path.exists():
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                if 'keybindings' in data and isinstance(data['keybindings'], dict):
+                    kbs = data['keybindings']
+                    # 检测是否为新版嵌套格式（values 是 dict）
+                    if kbs and all(isinstance(v, dict) for v in kbs.values()):
+                        # 新版 nested format: {section: {action: key}}
+                        config.keybindings = kbs
+                    else:
+                        # 旧版 flat format: {key: action} → 迁移为 {"global": {action: key}}
+                        migrated = {}
+                        for key, action_name in kbs.items():
+                            migrated[action_name] = key
+                        config.keybindings = {"global": migrated}
+                if 'theme' in data and isinstance(data['theme'], str):
+                    config.theme = data['theme']
+        except (json.JSONDecodeError, IOError):
+            pass  # 使用默认值，向后兼容
+        return config
+
+    def save_json_config(self, updates: dict) -> bool:
+        """
+        Save UI config updates to config.json.
+
+        只更新 config.json 中的 UI 相关字段（keybindings, theme），
+        不触碰 .env 中的后端配置。
+        """
+        json_path = self._get_json_path()
+        try:
+            data = {}
+            if json_path.exists():
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    try:
+                        data = json.load(f)
+                    except json.JSONDecodeError:
+                        data = {}
+            data.update(updates)
+            json_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            print(f"保存 JSON 配置失败: {e}")
+            return False
 
     def refresh_stock_list(self) -> None:
         """

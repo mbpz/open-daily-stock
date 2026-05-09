@@ -2,14 +2,31 @@
 from textual.widgets import Static
 from datetime import datetime, timezone, timedelta
 from tui.styles.theme import BG_DARK, FG_PRIMARY, ACCENT_BLUE
+from tui.styles.theme import LIGHT_BG, LIGHT_FG, LIGHT_ACCENT
 
 class Header(Static):
     """Top header bar."""
+    def __init__(self):
+        super().__init__()
+        self._theme = "dark"
+
     def on_mount(self):
         self.styles.height = 1
-        self.styles.background = ACCENT_BLUE
-        self.styles.color = FG_PRIMARY
+        self._apply_colors()
         self._update_time()
+
+    def _apply_colors(self):
+        if self._theme == "light":
+            self.styles.background = LIGHT_ACCENT
+            self.styles.color = LIGHT_FG
+        else:
+            self.styles.background = ACCENT_BLUE
+            self.styles.color = FG_PRIMARY
+
+    def apply_theme(self, theme: str):
+        """热切换主题"""
+        self._theme = theme
+        self._apply_colors()
 
     def _update_time(self):
         tz_cn = timezone(timedelta(hours=8))

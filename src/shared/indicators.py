@@ -1,4 +1,5 @@
 """Technical indicator calculations for charts.py."""
+from typing import Dict, List
 import pandas as pd
 import numpy as np
 
@@ -65,3 +66,52 @@ def calculate_bollinger_bands(closes: pd.Series, period: int = 20, num_std: floa
     upper = mid + num_std * std
     lower = mid - num_std * std
     return upper, mid, lower
+
+
+def _cluster_levels(levels: List[float], threshold: float) -> List[float]:
+    """Cluster nearby price levels within threshold%, return averaged levels."""
+    if not levels:
+        return []
+    sorted_levels = sorted(set(levels))
+    clusters = []
+    current_cluster = [sorted_levels[0]]
+    for level in sorted_levels[1:]:
+        if abs(level - current_cluster[-1]) / current_cluster[-1] < threshold:
+            current_cluster.append(level)
+        else:
+            clusters.append(round(float(np.mean(current_cluster)), 2))
+            current_cluster = [level]
+    clusters.append(round(float(np.mean(current_cluster)), 2))
+    return sorted(clusters)
+
+
+def calculate_fibonacci_levels(high: float, low: float) -> Dict[str, float]:
+    """Return Fibonacci retracement levels between high and low price."""
+    diff = high - low
+    return {
+        "0%": round(high, 2),
+        "23.6%": round(high - diff * 0.236, 2),
+        "38.2%": round(high - diff * 0.382, 2),
+        "50%": round(high - diff * 0.5, 2),
+        "61.8%": round(high - diff * 0.618, 2),
+        "78.6%": round(high - diff * 0.786, 2),
+        "100%": round(low, 2),
+    }
+
+
+def find_support_resistance(df: pd.DataFrame, window: int = 20, threshold: float = 0.03) -> Dict[str, List[float]]:
+    """Find support and resistance levels from local highs/lows.
+    Returns {'support': [...], 'resistance': [...]}"""
+    highs = df['High'].rolling(window, center=True).max()
+    lows = df['Low'].rolling(window, center=True).min()
+    resistance = []
+    support = []
+    for i in range(window, len(df) - window):
+        if df['High'].iloc[i] == highs.iloc[i]:
+            resistance.append(df['High'].iloc[i])
+        if df['Low'].iloc[i] == lows.iloc[i]:
+            support.append(df['Low'].iloc[i])
+    return {
+        'support': _cluster_levels(support, threshold),
+        'resistance': _cluster_levels(resistance, threshold)
+    }

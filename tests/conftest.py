@@ -47,3 +47,12 @@ def sample_stock_data():
             "volume": "3.2万",
         },
     }
+
+
+@pytest.fixture
+def unused_tcp_port():
+    """Return an unused TCP port for tests."""
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]

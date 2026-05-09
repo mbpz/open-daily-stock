@@ -1,14 +1,15 @@
 """Flet GUI 应用主类"""
+import sys
+import importlib
 import flet as ft
 
-from gui.theme import PRIMARY_COLOR, TEXT_PRIMARY, TEXT_SECONDARY
+from gui.theme import get_theme, set_theme as apply_theme, get_current_theme_name
 from src.i18n import _
 
 VERSION = "0.2.1"
 from src.service_client import ServiceClient
 from tui.data.task_store import TaskStore
 from src.config import get_config
-from src.core.pipeline import StockAnalysisPipeline
 
 
 class StockApp:
@@ -16,8 +17,18 @@ class StockApp:
 
     def __init__(self, page: ft.Page):
         self.page = page
+        config = get_config()
+
+        # 从 config.json 读取主题
+        self._theme = config.theme or "dark"
+        apply_theme(self._theme)
+
         self.page.title = _("stock_analysis")
-        self.page.bgcolor = PRIMARY_COLOR
+        theme = get_theme()
+        self.page.bgcolor = theme["PRIMARY_COLOR"]
+
+        # 读取按键配置（用于 tooltip 显示）
+        self._keybindings = config.keybindings if config.keybindings else {}
 
         self.nav_index = 0
         self.status_text = _("last_update")
@@ -33,6 +44,8 @@ class StockApp:
 
     def _build_ui(self):
         """Build the main UI layout"""
+        theme = get_theme()
+
         # Navigation rail
         self.nav_rail = ft.NavigationRail(
             selected_index=self.nav_index,
@@ -68,12 +81,23 @@ class StockApp:
             on_change=self._on_nav_change,
         )
 
-        # Status bar with version and update button
+        # Theme toggle button
+        theme_icon = ft.Icons.LIGHT_MODE if self._theme == "dark" else ft.Icons.DARK_MODE
+        theme_tooltip = _("切换到亮色主题") if self._theme == "dark" else _("切换到暗色主题")
+        self._theme_btn = ft.IconButton(
+            icon=theme_icon,
+            on_click=self._toggle_theme,
+            tooltip=theme_tooltip,
+        )
+
+        # Status bar with version, theme toggle, and update button
         self.status_bar = ft.Container(
             content=ft.Row([
-                ft.Text(f"{_('last_update')}: {self.status_text}", color=TEXT_SECONDARY, size=14),
+                ft.Text(f"{_('last_update')}: {self.status_text}",
+                        color=theme["TEXT_SECONDARY"], size=14),
                 ft.Container(expand=True),
-                ft.Text(f"v{VERSION}", color=TEXT_SECONDARY, size=12),
+                self._theme_btn,
+                ft.Text(f"v{VERSION}", color=theme["TEXT_SECONDARY"], size=12),
                 ft.IconButton(
                     icon=ft.Icons.UPDATE,
                     on_click=self._check_update,
@@ -81,13 +105,13 @@ class StockApp:
                 ),
             ]),
             padding=10,
-            bgcolor=PRIMARY_COLOR,
+            bgcolor=theme["PRIMARY_COLOR"],
             on_click=self._install_update,
         )
 
         # Content area
         self.content_area = ft.Container(
-            content=ft.Text(_("loading"), color=TEXT_PRIMARY),
+            content=ft.Text(_("loading"), color=theme["TEXT_PRIMARY"]),
             expand=True,
             padding=20,
         )
@@ -105,6 +129,60 @@ class StockApp:
         self.page.add(self.status_bar)
         self.page.add(main_row)
 
+    def _toggle_theme(self, e):
+        """Toggle between dark and light theme"""
+        new_theme = "light" if self._theme == "dark" else "dark"
+        self._theme = new_theme
+        theme = apply_theme(new_theme)
+
+        # 持久化到 config.json
+        config = get_config()
+        config.theme = new_theme
+        config.save_json_config({"theme": new_theme})
+
+        # Reload all page modules so their `from gui.theme import X` picks up new theme
+        for mod_name in list(sys.modules.keys()):
+            if mod_name.startswith("gui.pages."):
+                try:
+                    importlib.reload(sys.modules[mod_name])
+                except Exception:
+                    pass
+
+        # Update page background
+        self.page.bgcolor = theme["PRIMARY_COLOR"]
+
+        # Update theme button
+        self._theme_btn.icon = ft.Icons.LIGHT_MODE if new_theme == "dark" else ft.Icons.DARK_MODE
+        self._theme_btn.tooltip = _("切换到亮色主题") if new_theme == "dark" else _("切换到暗色主题")
+
+        # Update status bar
+        self._update_status_bar()
+
+        # Reload current page with new theme
+        page_names = ["chart", "markets", "analyze", "tasks", "config", "logs"]
+        current_page = page_names[self.nav_index] if self.nav_index < len(page_names) else "markets"
+        self._load_page(current_page)
+
+        self.page.update()
+
+    def _update_status_bar(self):
+        """Update status bar to reflect current theme"""
+        theme = get_theme()
+        self.status_bar.content = ft.Row([
+            ft.Text(f"{_('last_update')}: {self.status_text}",
+                    color=theme["TEXT_SECONDARY"], size=14),
+            ft.Container(expand=True),
+            self._theme_btn,
+            ft.Text(f"v{VERSION}", color=theme["TEXT_SECONDARY"], size=12),
+            ft.IconButton(
+                icon=ft.Icons.UPDATE,
+                on_click=self._check_update,
+                tooltip=_("check_update"),
+            ),
+        ])
+        self.status_bar.bgcolor = theme["PRIMARY_COLOR"]
+        self.status_bar.update()
+
     def _on_nav_change(self, e):
         """Handle navigation rail selection change"""
         page_names = ["chart", "markets", "analyze", "tasks", "config", "logs"]
@@ -113,6 +191,8 @@ class StockApp:
 
     def _load_page(self, page_name: str):
         """Load and display the specified page"""
+        theme = get_theme()
+
         page_map = {
             "chart": "gui.pages.chart",
             "markets": "gui.pages.markets",
@@ -133,7 +213,7 @@ class StockApp:
         if page_name not in page_map:
             self.content_area.content = ft.Text(
                 f"{_('unknown_page')}: {page_name}",
-                color=ft.colors.RED
+                color=theme["ERROR_COLOR"]
             )
             self.page.update()
             return
@@ -157,12 +237,12 @@ class StockApp:
             self.content_area.content = ft.Column([
                 ft.Text(
                     f"{_('failed_to_load')} {page_name}",
-                    color=ft.colors.RED,
+                    color=theme["ERROR_COLOR"],
                     size=16,
                 ),
                 ft.Text(
                     str(ex),
-                    color=ft.colors.GREY,
+                    color=theme["TEXT_MUTED"],
                     size=12,
                 ),
             ])
@@ -171,17 +251,7 @@ class StockApp:
     def update_status(self, text: str):
         """Update the status bar text"""
         self.status_text = text
-        self.status_bar.content = ft.Row([
-            ft.Text(f"{_('last_update')}: {self.status_text}", color=TEXT_SECONDARY, size=14),
-            ft.Container(expand=True),
-            ft.Text(f"v{VERSION}", color=TEXT_SECONDARY, size=12),
-            ft.IconButton(
-                icon=ft.Icons.UPDATE,
-                on_click=self._check_update,
-                tooltip=_("check_update"),
-            ),
-        ])
-        self.status_bar.update()
+        self._update_status_bar()
 
     def _check_update(self, e):
         """Check for application updates"""

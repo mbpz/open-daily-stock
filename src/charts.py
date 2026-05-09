@@ -150,6 +150,8 @@ from src.shared.indicators import (
     calculate_kdj as _calc_kdj,
     calculate_wr as _calc_wr,
     calculate_obv as _calc_obv,
+    calculate_fibonacci_levels,
+    find_support_resistance,
 )
 
 
@@ -234,6 +236,8 @@ def create_kline_chart(
     days: int = 60,
     output_dir: Optional[str] = None,
     indicators: Optional[List[str]] = None,
+    draw_sr: bool = False,
+    draw_fibonacci: bool = False,
 ) -> str:
     """
     创建 K线图表并保存为 PNG 文件。
@@ -244,6 +248,8 @@ def create_kline_chart(
         days: 显示的天数（默认60天）
         output_dir: 输出目录，默认使用 charts_cache 目录
         indicators: 技术指标列表，支持 rsi, macd, bollinger, kdj, wr, obv
+        draw_sr: 是否绘制支撑/阻力位
+        draw_fibonacci: 是否绘制斐波那契回调线
 
     Returns:
         保存的图表文件路径
@@ -301,6 +307,34 @@ def create_kline_chart(
                 all_plots.append(mpf.make_addplot(df["WR"], panel=1, ylabel="WR", y_on_right=True, color="orange", width=1.0))
             elif ind_lower == "obv":
                 all_plots.append(mpf.make_addplot(df["OBV"], panel=1, ylabel="OBV", y_on_right=True, color="brown", width=1.0))
+
+    # 支撑/阻力位叠加
+    if draw_sr:
+        sr_levels = find_support_resistance(df)
+        for level in sr_levels['support']:
+            all_plots.append(mpf.make_addplot(
+                pd.Series(level, index=df.index),
+                panel=0, color='green', linestyle='dashed', width=0.8,
+                secondary_y=False
+            ))
+        for level in sr_levels['resistance']:
+            all_plots.append(mpf.make_addplot(
+                pd.Series(level, index=df.index),
+                panel=0, color='red', linestyle='dashed', width=0.8,
+                secondary_y=False
+            ))
+
+    # 斐波那契回调线叠加
+    if draw_fibonacci:
+        high = df['High'].max()
+        low = df['Low'].min()
+        fib_levels = calculate_fibonacci_levels(high, low)
+        for label, level in fib_levels.items():
+            all_plots.append(mpf.make_addplot(
+                pd.Series(level, index=df.index),
+                panel=0, color='orange', linestyle='dotted', width=0.5,
+                secondary_y=False
+            ))
 
     # 绘制图表
     fig, axes = mpf.plot(

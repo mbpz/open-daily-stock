@@ -25,6 +25,13 @@ class TestTUIApp:
         config.wechat_webhook_url = None
         config.feishu_webhook_url = None
         config.is_first_time_setup.return_value = False
+        config.keybindings = {
+            "q": "quit", "1": "markets", "2": "tasks",
+            "3": "analyze", "4": "config", "5": "logs",
+            "tab": "next_module", "r": "refresh", "?": "help",
+            "t": "toggle_theme",
+        }
+        config.theme = "dark"
         return config
 
     @pytest.fixture

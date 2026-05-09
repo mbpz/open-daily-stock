@@ -13,6 +13,8 @@ import sqlite3
 from .config import get_config
 from .alert_service import AlertService
 from .storage import get_db, get_market_cache
+from .sim_trading import SimAccount
+from .financials import FinancialDataFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,7 @@ class DataService:
     def __init__(self):
         self._running = True
         self._db_path = ".open-daily-stock.db"
+        self._init_db()
         # Initialize database via storage.py (ensures schema tables exist)
         get_db()
         self._alert_service = AlertService()
@@ -86,12 +89,28 @@ class DataService:
             "save_alert": "_handle_save_alert",
             "delete_alert": "_handle_delete_alert",
             "toggle_alert": "_handle_toggle_alert",
+            "get_drawing_data": "_handle_get_drawing_data",
+            "get_financials": "_handle_get_financials",
+            "get_key_metrics": "_handle_get_key_metrics",
             "quit": "_handle_quit",
+            "sim_buy": "_handle_sim_buy",
+            "sim_sell": "_handle_sim_sell",
+            "sim_summary": "_handle_sim_summary",
+            "sim_history": "_handle_sim_history",
+            "sim_reset": "_handle_sim_reset",
+            "get_keybindings": "_handle_get_keybindings",
+            "list_providers": "_handle_list_providers",
         }
+
+        # Simulated trading account
+        self._sim_account = SimAccount()
 
         # Task storage for async operations
         self._tasks: Dict[str, Dict[str, Any]] = {}
         self._tasks_lock = threading.Lock()
+
+        # Load external data provider plugins
+        self._load_plugins()
 
     def _handle_request(self, req: Dict[str, Any]) -> Dict[str, Any]:
         """根据 action 分发到对应 handler with timeout protection"""
@@ -124,10 +143,24 @@ class DataService:
     def _handle_get_markets(self, req: Dict[str, Any]) -> Dict[str, Any]:
         try:
             markets = self._get_markets()
+            include_sparkline = req.get("include_sparkline", False)
+            if include_sparkline:
+                for m in markets:
+                    history = self._get_recent_prices(m.get("code"), days=10)
+                    m["sparkline_data"] = history
             return {"status": "ok", "data": markets}
         except Exception as e:
             logger.error(f"获取行情失败: {e}")
             return {"status": "error", "message": "获取行情失败，请稍后重试"}
+
+    def _get_recent_prices(self, code: str, days: int = 10) -> List[float]:
+        """Get recent closing prices for sparkline."""
+        try:
+            db = get_db()
+            data = db.get_latest_data(code, days=days)
+            return [d.close for d in reversed(data)] if data else []
+        except Exception:
+            return []
 
     def _handle_refresh(self, req: Dict[str, Any]) -> Dict[str, Any]:
         try:
@@ -141,6 +174,58 @@ class DataService:
     def _handle_quit(self, req: Dict[str, Any]) -> Dict[str, Any]:
         self._running = False
         return {"status": "ok", "message": "退出"}
+
+    # === Simulated Trading Handlers ===
+
+    def _handle_sim_buy(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        code = req["code"]
+        name = req.get("name", code)
+        price = req["price"]
+        shares = req.get("shares", 100)
+        result = self._sim_account.buy(code, name, price, shares)
+        # Persist after each trade
+        try:
+            get_db().save_sim_account(self._sim_account.to_dict())
+        except Exception as e:
+            logger.warning(f"持久化模拟账户失败: {e}")
+        return result
+
+    def _handle_sim_sell(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        code = req["code"]
+        price = req["price"]
+        shares = req.get("shares")
+        result = self._sim_account.sell(code, price, shares)
+        # Persist after each trade
+        try:
+            get_db().save_sim_account(self._sim_account.to_dict())
+        except Exception as e:
+            logger.warning(f"持久化模拟账户失败: {e}")
+        return result
+
+    def _handle_sim_summary(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        # Update prices from market data first
+        markets = self._get_markets()
+        prices = {m["code"]: m["price"] for m in markets}
+        self._sim_account.update_prices(prices)
+        return {"status": "ok", "data": self._sim_account.get_summary()}
+
+    def _handle_sim_history(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        return {"status": "ok", "data": self._sim_account.trade_history[-50:]}
+
+    def _handle_sim_reset(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        self._sim_account = SimAccount()
+        # Clear persisted account
+        try:
+            get_db().save_sim_account(None)
+        except Exception as e:
+            logger.warning(f"清除模拟账户持久化失败: {e}")
+        return {"status": "ok", "message": "账户已重置"}
+
+    def _handle_get_keybindings(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """返回指定 section 的 keybindings 配置。"""
+        from src.shared.keybindings import get_all_keybindings
+        section = req.get("section", "global")
+        return {"status": "ok", "data": get_all_keybindings(section)}
 
     # === Stub Handlers for New Actions ===
 
@@ -164,11 +249,17 @@ class DataService:
                 "error": None,
             }
 
-        # Persist task creation
+        # Persist task creation (AnalysisHistory for backward compat)
         try:
             get_db().save_task(task_id, code, "pending")
         except Exception:
             pass  # Non-critical if DB save fails initially
+
+        # Persist to task_log
+        try:
+            get_db().save_task_log(task_id, "analyze", code, "pending")
+        except Exception as e:
+            logger.warning(f"Failed to save task_log for {task_id}: {e}")
 
         # 异步执行分析（不阻塞 DataService）
         thread = threading.Thread(target=self._run_analyze_task, args=(task_id, code))
@@ -190,6 +281,10 @@ class DataService:
 
             # Persist running status
             db.save_task(task_id, code, "running")
+            try:
+                db.update_task_log(task_id, "running")
+            except Exception as e:
+                logger.warning(f"Failed to update task_log to running for {task_id}: {e}")
 
             # 获取分析上下文
             context = db.get_analysis_context(code)
@@ -209,6 +304,11 @@ class DataService:
 
             # Persist completed status
             db.save_task(task_id, code, "completed", result_json=json.dumps(result.to_dict()))
+            try:
+                db.update_task_log(task_id, "done", completed_at=datetime.now(),
+                                   result_json=json.dumps(result.to_dict()))
+            except Exception as e:
+                logger.warning(f"Failed to update task_log to done for {task_id}: {e}")
 
             # 发送通知
             self._send_analysis_notification(code, result)
@@ -221,6 +321,10 @@ class DataService:
                 self._tasks[task_id]["status"] = "failed"
                 self._tasks[task_id]["error"] = str(e)
             db.save_task(task_id, code, "failed", error=str(e))
+            try:
+                db.update_task_log(task_id, "failed", completed_at=datetime.now())
+            except Exception as ex:
+                logger.warning(f"Failed to update task_log to failed for {task_id}: {ex}")
 
     def _send_analysis_notification(self, code: str, result):
         """发送分析完成通知"""
@@ -316,6 +420,14 @@ class DataService:
             if not history_data:
                 return {"status": "ok", "data": [], "message": "无历史数据"}
 
+            # 保存到 daily_history 表（幂等）
+            try:
+                saved = get_db().save_daily_history(code, history_data)
+                if saved:
+                    logger.debug(f"Persisted {saved} new rows to daily_history for {code}")
+            except Exception as e:
+                logger.warning(f"Failed to persist daily_history for {code}: {e}")
+
             # 生成K线图表
             from src.charts import create_kline_chart
             chart_path = create_kline_chart(history_data, code, days=days, indicators=indicators)
@@ -398,6 +510,48 @@ class DataService:
         except Exception as e:
             logger.error(f"获取技术指标失败 [{code}]: {e}")
             return {"status": "error", "message": f"获取技术指标失败: {str(e)}"}
+
+    def _handle_get_drawing_data(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """获取画线工具数据（支撑/阻力位、斐波那契回调线）"""
+        code = req.get("code")
+        if not code:
+            return {"status": "error", "message": "缺少股票代码 code 参数"}
+
+        days = req.get("days", 60)
+
+        try:
+            from datetime import date, timedelta
+            from src.charts import convert_history_to_df
+            from src.shared.indicators import find_support_resistance, calculate_fibonacci_levels
+
+            # 获取历史数据
+            history_data = get_db().get_data_range(
+                code,
+                date.today() - timedelta(days=days),
+                date.today()
+            )
+            if not history_data:
+                return {"status": "ok", "data": {}, "message": "无历史数据"}
+
+            df = convert_history_to_df(history_data)
+            if df is None or len(df) == 0:
+                return {"status": "ok", "data": {}, "message": "无历史数据"}
+
+            sr = find_support_resistance(df)
+            high = float(df['High'].max())
+            low = float(df['Low'].min())
+            fib = calculate_fibonacci_levels(high, low)
+
+            return {
+                "status": "ok",
+                "support_resistance": sr,
+                "fibonacci": fib,
+                "high": high,
+                "low": low,
+            }
+        except Exception as e:
+            logger.error(f"获取画线数据失败 [{code}]: {e}")
+            return {"status": "error", "message": f"获取画线数据失败: {str(e)}"}
 
     def _handle_get_tasks(self, req: Dict[str, Any]) -> Dict[str, Any]:
         """获取所有任务列表"""
@@ -788,6 +942,137 @@ class DataService:
             logger.error(f"[筛选器] 筛选失败: {e}")
             return {"status": "error", "message": f"筛选失败: {str(e)}"}
 
+    # === Financial Statement Handler ===
+
+    def _handle_get_financials(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """获取财务报表数据（利润表/资产负债表/现金流量表）"""
+        code = req.get("code")
+        if not code:
+            return {"status": "error", "message": "缺少股票代码 code 参数"}
+
+        statement_type = req.get("type", "income")
+        if statement_type not in ("income", "balance", "cashflow"):
+            return {"status": "error", "message": f"不支持的报表类型: {statement_type}，支持: income/balance/cashflow"}
+
+        try:
+            from src.analyzer import STOCK_NAME_MAP
+            name = STOCK_NAME_MAP.get(code, code)
+
+            fetcher = FinancialDataFetcher()
+            df = fetcher.get_financial_report_df(code, statement_type)
+
+            if df is None or len(df) == 0:
+                return {"status": "ok", "data": {
+                    "code": code, "name": name, "type": statement_type,
+                    "periods": [], "items": [],
+                }, "message": "无财务数据"}
+
+            # Find the period/date column
+            period_col = None
+            for col in ["报告期", "REPORT_DATE", "报告日期"]:
+                if col in df.columns:
+                    period_col = col
+                    break
+
+            if period_col is None:
+                for col in df.columns[:3]:
+                    period_col = col
+                    break
+
+            # Get periods (most recent first)
+            periods = df[period_col].astype(str).tolist()[-8:]
+
+            # Get key financial items with column name mappings
+            if statement_type == "income":
+                key_items = [
+                    ("营业总收入", "TOTALOPERATEREVE", "OPERATEREVE"),
+                    ("营业收入", "OPERATEREVE", "营业总收入"),
+                    ("营业成本", "TOTALOPERATEEXP", "OPERATEEXP"),
+                    ("净利润", "NETPROFIT", "KCFL"),
+                    ("营业利润", "OPERATEPROFIT", "TOTALPROFIT"),
+                ]
+            elif statement_type == "balance":
+                key_items = [
+                    ("资产总计", "TOTALASSETS"),
+                    ("负债合计", "TOTALLIABILITIES"),
+                    ("股东权益合计", "EQUITYTOTAL", "归属于母公司股东权益合计"),
+                    ("流动资产合计", "TOTALCURRENTASSETS"),
+                    ("流动负债合计", "TOTALCURRENTLIABILITIES"),
+                ]
+            else:
+                key_items = [
+                    ("经营活动现金流量净额", "CASHFLOWOPERATE"),
+                    ("投资活动现金流量净额", "CASHFLOWINVEST"),
+                    ("筹资活动现金流量净额", "CASHFLOWFINANCE"),
+                    ("期末现金余额", "期末现金及现金等价物余额"),
+                ]
+
+            # Extract items from dataframe
+            items = []
+            for item_def in key_items:
+                chinese_name = item_def[0]
+                candidates = list(item_def)
+                col_name = None
+                for candidate in candidates:
+                    if candidate and candidate in df.columns:
+                        col_name = candidate
+                        break
+
+                if col_name is None:
+                    for col in df.columns:
+                        if isinstance(col, str) and chinese_name[:2] in col:
+                            col_name = col
+                            break
+
+                if col_name is not None:
+                    values = df[col_name].tolist()[-8:]
+                    values = [self._safe_float(v) for v in values]
+                    items.append({"name": chinese_name, "values": values})
+
+            return {"status": "ok", "data": {
+                "code": code,
+                "name": name,
+                "type": statement_type,
+                "periods": periods,
+                "items": items,
+            }}
+
+        except ImportError:
+            logger.warning(f"获取财务报表失败 [{code}]: akshare 未安装")
+            return {"status": "error", "message": "财务报表功能需要 akshare 库支持，请安装 akshare"}
+        except Exception as e:
+            logger.error(f"获取财务报表失败 [{code}]: {e}")
+            return {"status": "error", "message": f"获取财务报表失败: {str(e)}"}
+
+    def _handle_get_key_metrics(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """获取股票关键财务指标（PE/PB/ROE/市值/增长率等）"""
+        code = req.get("code")
+        if not code:
+            return {"status": "error", "message": "缺少股票代码 code 参数"}
+
+        try:
+            fetcher = FinancialDataFetcher()
+            data = fetcher.get_key_metrics(code)
+            if data is None:
+                return {"status": "error", "message": f"获取 {code} 关键指标失败: 无数据"}
+            return {"status": "ok", "data": data}
+        except ImportError:
+            logger.warning(f"获取关键指标失败 [{code}]: akshare 未安装")
+            return {"status": "error", "message": "关键指标功能需要 akshare 库支持，请安装 akshare"}
+        except Exception as e:
+            logger.error(f"获取关键指标失败 [{code}]: {e}")
+            return {"status": "error", "message": f"获取关键指标失败: {str(e)}"}
+
+    @staticmethod
+    def _safe_float(value):
+        """安全转换为 float"""
+        if value is None:
+            return 0.0
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return 0.0
+
     # === Existing Helper Methods ===
 
     def _init_db(self):
@@ -841,6 +1126,40 @@ class DataService:
     def _send(self, data: Dict[str, Any]):
         """发送 JSON 到 stdout"""
         print(json.dumps(data), flush=True)
+
+    def _handle_list_providers(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """列出所有已注册的数据源插件"""
+        from src.data_provider.plugin import ProviderRegistry
+        market = req.get("market", "ALL")
+        registry = ProviderRegistry.get_instance()
+        providers = registry.list_providers(market)
+        return {
+            "status": "ok",
+            "data": [
+                {
+                    "name": p.name,
+                    "priority": p.priority,
+                    "market": p.market,
+                    "available": p.is_available(),
+                }
+                for p in providers
+            ],
+        }
+
+    def _load_plugins(self):
+        """根据配置加载外部数据源插件"""
+        import importlib
+        config = get_config()
+        for plugin_path in config.data_provider_plugins:
+            try:
+                module_name, class_name = plugin_path.rsplit(".", 1)
+                module = importlib.import_module(f"data_provider.{module_name}")
+                provider_class = getattr(module, class_name)
+                from src.data_provider.plugin import ProviderRegistry
+                ProviderRegistry.get_instance().register(provider_class())
+                logger.info(f"Loaded data provider plugin: {plugin_path}")
+            except Exception as e:
+                logger.warning(f"Failed to load plugin {plugin_path}: {e}")
 
     def _get_markets(self) -> List[Dict]:
         """从数据库获取行情数据"""
@@ -1103,7 +1422,106 @@ class DataService:
         })
 
     # ============================================================
-    # Main Run Loop
+    # WebSocket IPC Server
+    # ============================================================
+
+    def run_ws_server(self, host: str = "127.0.0.1", port: int = 9876):
+        """
+        Run DataService as a WebSocket server.
+
+        Each connected client sends JSON request lines and receives JSON responses.
+        The action registry (same as stdio mode) dispatches requests to handlers.
+        Market data updates are broadcast to all connected clients every 30 seconds.
+        """
+        import asyncio
+
+        try:
+            import websockets
+            from websockets.asyncio.server import serve
+        except ImportError:
+            logger.error(
+                "websockets library is required for WebSocket server mode. "
+                "Install it with: pip install websockets"
+            )
+            return 1
+
+        connected = set()
+
+        async def handle_client(websocket):
+            """Handle a single WebSocket client connection."""
+            connected.add(websocket)
+            logger.info(f"WebSocket client connected (total: {len(connected)})")
+            try:
+                async for raw_message in websocket:
+                    try:
+                        req = json.loads(raw_message)
+                    except json.JSONDecodeError:
+                        await websocket.send(json.dumps({"status": "error", "message": "invalid json"}))
+                        continue
+                    # _handle_request blocks (thread pool + future.result()),
+                    # so run it in a thread to avoid blocking the event loop
+                    try:
+                        resp = await asyncio.to_thread(self._handle_request, req)
+                    except Exception as e:
+                        logger.error(f"WS request error: {e}")
+                        resp = {"status": "error", "message": str(e)}
+                    try:
+                        await websocket.send(json.dumps(resp, ensure_ascii=False, default=str))
+                    except Exception:
+                        break  # Client disconnected, exit message loop
+            except Exception:
+                pass  # Client disconnected
+            finally:
+                connected.discard(websocket)
+                logger.info(f"WebSocket client disconnected (total: {len(connected)})")
+
+        async def broadcast_loop():
+            """Periodically broadcast market data to all connected clients."""
+            while self._running:
+                await asyncio.sleep(30)
+                if not connected:
+                    continue
+                try:
+                    markets = self._get_markets()
+                    msg = json.dumps(
+                        {"type": "market_update", "data": markets},
+                        ensure_ascii=False,
+                        default=str,
+                    )
+                    stale = set()
+                    for ws in connected:
+                        try:
+                            await ws.send(msg)
+                        except Exception:
+                            stale.add(ws)
+                    connected.difference_update(stale)
+                except Exception as e:
+                    logger.error(f"Broadcast error: {e}")
+
+        async def serve_forever():
+            async with serve(handle_client, host, port) as server:
+                logger.info(f"WebSocket server listening on ws://{host}:{port}")
+                broadcast_task = asyncio.create_task(broadcast_loop())
+                try:
+                    while self._running:
+                        await asyncio.sleep(1)
+                finally:
+                    broadcast_task.cancel()
+                    try:
+                        await broadcast_task
+                    except asyncio.CancelledError:
+                        pass
+                logger.info("WebSocket server stopped")
+
+        try:
+            asyncio.run(serve_forever())
+        except KeyboardInterrupt:
+            logger.info("WebSocket server interrupted")
+
+        return 0
+
+    # ============================================================
+    # Main Run Loop (stdio mode)
     # ============================================================
 
     def run(self):

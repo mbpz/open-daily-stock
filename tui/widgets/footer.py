@@ -1,6 +1,7 @@
 """Footer bar widget showing shortcuts, notifications, last update time."""
 from textual.widgets import Static
 from tui.styles.theme import BG_CARD, FG_SECONDARY
+from tui.styles.theme import LIGHT_BG, LIGHT_FG, LIGHT_CARD
 from src.shared.market_status import get_market_statuses
 
 class Footer(Static):
@@ -9,6 +10,7 @@ class Footer(Static):
         super().__init__()
         self._last_update = last_update
         self._market_status = ""
+        self._theme = "dark"
 
     def set_last_update(self, ts: str):
         self._last_update = ts
@@ -26,6 +28,16 @@ class Footer(Static):
 
     def _update_display(self):
         self.update(f"  {self._market_status}  |  最后更新: {self._last_update}  ")
+
+    def apply_theme(self, theme: str):
+        """热切换主题"""
+        self._theme = theme
+        if theme == "light":
+            self.styles.background = LIGHT_CARD
+            self.styles.color = LIGHT_FG
+        else:
+            self.styles.background = BG_CARD
+            self.styles.color = FG_SECONDARY
 
     def on_mount(self):
         self.styles.height = 1

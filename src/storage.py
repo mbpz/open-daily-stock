@@ -14,6 +14,7 @@ A股自选股智能分析系统 - 存储层
 from __future__ import annotations
 
 import atexit
+import json
 import logging
 import time
 from datetime import datetime, date, timedelta
@@ -171,6 +172,57 @@ Base = declarative_base()
 CURRENT_SCHEMA_VERSION = 2
 
 
+# === Migration System ===
+
+
+def _run_migrations(db: 'DatabaseManager', from_version: int, to_version: int) -> None:
+    """Run schema migrations from `from_version` to `to_version`.
+
+    This is a placeholder for future migrations.  New migration steps should
+    be added as conditions inside this function so that upgrades from any
+    older version can be handled in a single pass.
+
+    Args:
+        db: DatabaseManager instance (can use db.get_session() for raw SQL).
+        from_version: The version the database is currently at.
+        to_version: The target schema version.
+    """
+    if from_version >= to_version:
+        return
+
+    logger.info(f"Running migrations: v{from_version} -> v{to_version}")
+
+    # Example of how future migrations would be structured:
+    # if from_version < 2:
+    #     with db.get_session() as session:
+    #         # Add new columns, create new tables, etc.
+    #         pass
+    #     logger.info("Migration v1 -> v2 applied")
+
+    if from_version < 2 and to_version >= 2:
+        # Placeholder: add `task_id` column to analysis_history (already
+        # handled by _migrate_analysis_history_task_id), but future
+        # migrations that require Data Definition Language go here.
+        pass
+
+    # Record the new schema version after all migrations succeed
+    # Only insert if this version hasn't been recorded yet (idempotent)
+    with db.get_session() as session:
+        existing = session.execute(
+            select(SchemaVersion).where(SchemaVersion.version == to_version)
+        ).scalars().first()
+        if existing is None:
+            sv = SchemaVersion(
+                version=to_version,
+                description=f"Migrated from v{from_version} to v{to_version}",
+            )
+            session.add(sv)
+            session.commit()
+            logger.info(f"Migration complete. Schema at v{to_version}")
+        else:
+            logger.debug(f"Schema v{to_version} already recorded, skipping.")
+
+
 # === 数据模型定义 ===
 
 class SchemaVersion(Base):
@@ -254,6 +306,48 @@ class StockDaily(Base):
         }
 
 
+class DailyHistory(Base):
+    """
+    每日行情历史原始数据
+
+    与 stock_daily 的区别：daily_history 仅存储原始 OHLCV 数据，
+    不包含技术指标，作为数据获取动作 (get_kline_data) 的持久化记录。
+    支持幂等插入（code + date 唯一约束）。
+    """
+    __tablename__ = 'daily_history'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), nullable=False, index=True)
+    date = Column(Date, nullable=False, index=True)
+    open = Column(Float)
+    high = Column(Float)
+    low = Column(Float)
+    close = Column(Float)
+    volume = Column(Float)
+    pct_chg = Column(Float)
+    created_at = Column(DateTime, default=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint('code', 'date', name='uix_daily_history_code_date'),
+        Index('ix_daily_history_code_date', 'code', 'date'),
+    )
+
+    def __repr__(self):
+        return f"<DailyHistory(code={self.code}, date={self.date}, close={self.close})>"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'code': self.code,
+            'date': self.date.isoformat() if isinstance(self.date, date) else str(self.date),
+            'open': self.open,
+            'high': self.high,
+            'low': self.low,
+            'close': self.close,
+            'volume': self.volume,
+            'pct_chg': self.pct_chg,
+        }
+
+
 class DatabaseManager:
     """
     数据库管理器 - 单例模式
@@ -307,8 +401,10 @@ class DatabaseManager:
         # Migration: ensure task_id column exists in analysis_history
         self._migrate_analysis_history_task_id()
 
-        # Ensure schema version is recorded
-        self.ensure_schema_version()
+        # Ensure schema version is recorded and run migrations if needed
+        existing_version = self.ensure_schema_version()
+        if existing_version < CURRENT_SCHEMA_VERSION:
+            _run_migrations(self, existing_version, CURRENT_SCHEMA_VERSION)
 
         self._initialized = True
         logger.info(f"数据库初始化完成: {db_url}")
@@ -559,9 +655,112 @@ class DatabaseManager:
                 raise
         
         return saved_count
-    
+
+    def save_daily_history(
+        self,
+        code: str,
+        data: List[Dict[str, Any]],
+    ) -> int:
+        """
+        Save raw OHLCV data to daily_history (idempotent).
+
+        Skips rows where (code, date) already exist.
+
+        Args:
+            code: Stock code.
+            data: List of dicts, each with keys: date (str), open, high,
+                  low, close, volume, pct_chg.
+
+        Returns:
+            Number of new rows inserted.
+        """
+        if not data:
+            return 0
+
+        saved = 0
+        session = self.get_session()
+        try:
+            for row in data:
+                row_date = row.get('date')
+                if isinstance(row_date, str):
+                    try:
+                        row_date = datetime.strptime(row_date, '%Y-%m-%d').date()
+                    except ValueError:
+                        row_date = datetime.strptime(row_date, '%Y%m%d').date()
+                elif isinstance(row_date, datetime):
+                    row_date = row_date.date()
+
+                # Idempotent: skip if already exists
+                existing = session.execute(
+                    select(DailyHistory).where(
+                        and_(
+                            DailyHistory.code == code,
+                            DailyHistory.date == row_date,
+                        )
+                    )
+                ).scalar_one_or_none()
+
+                if existing is not None:
+                    continue
+
+                record = DailyHistory(
+                    code=code,
+                    date=row_date,
+                    open=row.get('open'),
+                    high=row.get('high'),
+                    low=row.get('low'),
+                    close=row.get('close'),
+                    volume=row.get('volume'),
+                    pct_chg=row.get('pct_chg'),
+                )
+                session.add(record)
+                saved += 1
+
+            session.commit()
+            if saved:
+                logger.info(f"daily_history: saved {saved} new rows for {code}")
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+        return saved
+
+    def get_daily_history(
+        self,
+        code: str,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve OHLCV history from daily_history.
+
+        Args:
+            code: Stock code.
+            start_date: Inclusive start date (optional).
+            end_date: Inclusive end date (optional).
+
+        Returns:
+            List of dicts ordered by date ascending.
+        """
+        with self.get_session() as session:
+            conditions = [DailyHistory.code == code]
+            if start_date is not None:
+                conditions.append(DailyHistory.date >= start_date)
+            if end_date is not None:
+                conditions.append(DailyHistory.date <= end_date)
+
+            results = session.execute(
+                select(DailyHistory)
+                .where(and_(*conditions))
+                .order_by(DailyHistory.date)
+            ).scalars().all()
+
+            return [r.to_dict() for r in results]
+
     def get_analysis_context(
-        self, 
+        self,
         code: str,
         target_date: Optional[date] = None
     ) -> Optional[Dict[str, Any]]:
@@ -590,9 +789,13 @@ class DatabaseManager:
         today_data = recent_data[0]
         yesterday_data = recent_data[1] if len(recent_data) > 1 else None
         
+        # Determine market type: CN (6-digit numeric), HK (5-digit), US (alpha)
+        market = self._detect_market(code)
+
         context = {
             'code': code,
             'date': today_data.date.isoformat(),
+            'market': market,
             'today': today_data.to_dict(),
         }
         
@@ -614,7 +817,27 @@ class DatabaseManager:
             context['ma_status'] = self._analyze_ma_status(today_data)
         
         return context
-    
+
+    @staticmethod
+    def _detect_market(code: str) -> str:
+        """Detect market type from stock code.
+
+        Returns:
+            "CN" for A-shares (6-digit numeric), "HK" for HK stocks (5-digit),
+            "US" for US stocks (alphabetic).
+        """
+        code_upper = code.upper().replace(".", "")
+        if code_upper.startswith("HK"):
+            return "HK"
+        elif code_upper.isdigit() and len(code_upper) == 5:
+            return "HK"
+        elif code_upper.isalpha() and len(code_upper) <= 5:
+            return "US"
+        elif code_upper.isdigit() and len(code_upper) == 6:
+            return "CN"
+        else:
+            return "Unknown"
+
     def _analyze_ma_status(self, data: StockDaily) -> str:
         """
         分析均线形态
@@ -786,6 +1009,86 @@ class DatabaseManager:
             try:
                 result = session.execute(
                     select(AnalysisHistory).where(AnalysisHistory.task_id == task_id)
+                ).scalars().first()
+                return result.to_dict() if result else None
+            except Exception:
+                session.rollback()
+                return None
+
+    # === Task Log CRUD (task_log table) ===
+
+    def save_task_log(self, task_id: str, action: str, code: str,
+                      status: str = "pending",
+                      result_json: Optional[str] = None) -> None:
+        """Create a new entry in task_log or update if task_id exists."""
+        with self.get_session() as session:
+            try:
+                existing = session.execute(
+                    select(TaskLog).where(TaskLog.task_id == task_id)
+                ).scalars().first()
+
+                if existing:
+                    existing.status = status
+                    if result_json is not None:
+                        existing.result_json = result_json
+                else:
+                    entry = TaskLog(
+                        task_id=task_id,
+                        action=action,
+                        code=code,
+                        status=status,
+                        result_json=result_json,
+                    )
+                    session.add(entry)
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+
+    def update_task_log(self, task_id: str, status: str,
+                        completed_at: Optional[datetime] = None,
+                        result_json: Optional[str] = None) -> None:
+        """Update status (and optionally result) of an existing task_log entry."""
+        with self.get_session() as session:
+            try:
+                entry = session.execute(
+                    select(TaskLog).where(TaskLog.task_id == task_id)
+                ).scalars().first()
+                if entry is None:
+                    logger.warning(f"update_task_log: task_id {task_id} not found")
+                    return
+                entry.status = status
+                if completed_at is not None:
+                    entry.completed_at = completed_at
+                else:
+                    entry.completed_at = datetime.now()
+                if result_json is not None:
+                    entry.result_json = result_json
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+
+    def get_task_logs(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Return recent task_log entries (most recent first)."""
+        with self.get_session() as session:
+            try:
+                results = session.execute(
+                    select(TaskLog)
+                    .order_by(desc(TaskLog.created_at))
+                    .limit(limit)
+                ).scalars().all()
+                return [r.to_dict() for r in results]
+            except Exception:
+                session.rollback()
+                return []
+
+    def get_task_log(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single task_log entry by task_id."""
+        with self.get_session() as session:
+            try:
+                result = session.execute(
+                    select(TaskLog).where(TaskLog.task_id == task_id)
                 ).scalars().first()
                 return result.to_dict() if result else None
             except Exception:
@@ -974,6 +1277,61 @@ class DatabaseManager:
             session.commit()
             return True
 
+    # === Simulated Trading Account Persistence ===
+
+    def save_sim_account(self, account_data: Optional[Dict]) -> None:
+        """Save simulated trading account state as JSON.
+
+        Args:
+            account_data: Account dict from SimAccount.to_dict(), or None to clear.
+        """
+        with self.get_session() as session:
+            existing = session.execute(
+                select(SimAccountRecord)
+            ).scalars().first()
+            if existing:
+                if account_data is None:
+                    session.delete(existing)
+                else:
+                    existing.data_json = json.dumps(account_data, ensure_ascii=False)
+                    existing.updated_at = datetime.now()
+            elif account_data is not None:
+                record = SimAccountRecord(
+                    data_json=json.dumps(account_data, ensure_ascii=False),
+                )
+                session.add(record)
+            session.commit()
+
+    def load_sim_account(self) -> Optional[Dict]:
+        """Load simulated trading account state from JSON.
+
+        Returns:
+            Account dict for SimAccount.from_dict(), or None if not saved.
+        """
+        with self.get_session() as session:
+            record = session.execute(
+                select(SimAccountRecord)
+            ).scalars().first()
+            if record and record.data_json:
+                try:
+                    return json.loads(record.data_json)
+                except json.JSONDecodeError:
+                    logger.warning("Failed to decode sim_account JSON; returning None")
+                    return None
+            return None
+
+
+class SimAccountRecord(Base):
+    """Simulated trading account persistence record."""
+    __tablename__ = 'sim_account'
+
+    id = Column(Integer, primary_key=True, default=1)
+    data_json = Column(Text)
+    updated_at = Column(DateTime, default=datetime.now)
+
+    def __repr__(self):
+        return f"<SimAccountRecord(updated_at={self.updated_at})>"
+
 
 class AnalysisHistory(Base):
     """
@@ -1017,6 +1375,38 @@ class AnalysisHistory(Base):
             'status': self.status,
             'result_json': self.result_json,
             'error': self.error,
+        }
+
+
+class TaskLog(Base):
+    """
+    任务执行日志
+
+    独立于 AnalysisHistory，专门记录数据服务层（DataService）的任务执行生命周期。
+    每个任务从创建到完成都有一条记录，可用于监控和重放。
+    """
+    __tablename__ = 'task_log'
+
+    task_id = Column(String(50), primary_key=True)
+    action = Column(String(50), nullable=False, index=True)
+    code = Column(String(10), nullable=False, index=True)
+    status = Column(String(20), default="pending", index=True)  # pending/running/done/failed
+    created_at = Column(DateTime, default=datetime.now)
+    completed_at = Column(DateTime)
+    result_json = Column(Text)
+
+    def __repr__(self):
+        return f"<TaskLog(task_id={self.task_id}, action={self.action}, status={self.status})>"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'task_id': self.task_id,
+            'action': self.action,
+            'code': self.code,
+            'status': self.status,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'result_json': self.result_json,
         }
 
 

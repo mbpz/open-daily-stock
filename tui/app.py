@@ -4,6 +4,8 @@ from textual.app import App
 from textual.binding import Binding
 from textual.timer import Timer
 from textual.widgets import Static
+from tui.widgets.header import Header
+from tui.widgets.footer import Footer
 from tui.widgets.nav import Nav
 from tui.widgets.markets import MarketsView
 from tui.widgets.tasks import TasksView
@@ -19,24 +21,130 @@ from typing import Optional
 
 MODULES = [MarketsView, TasksView, AnalyzeView, ConfigView, LogsView]
 
+# 默认按键映射（当 config.json 未配置 keybindings 时使用）
+_DEFAULT_KEYBINDINGS = {
+    "q": "quit",
+    "1": "markets",
+    "2": "tasks",
+    "3": "analyze",
+    "4": "config",
+    "5": "logs",
+    "tab": "next_module",
+    "r": "refresh",
+    "?": "help",
+    "t": "toggle_theme",
+}
+
+# 动作名称 → Textual action 映射
+_ACTION_MAP = {
+    "quit": "quit",
+    "markets": "switch(0)",
+    "tasks": "switch(1)",
+    "analyze": "switch(2)",
+    "config": "switch(3)",
+    "logs": "switch(4)",
+    "next_module": "next_module",
+    "refresh": "refresh",
+    "help": "help",
+    "toggle_theme": "toggle_theme",
+}
+
+# 动作名称 → 显示标签
+_ACTION_LABELS = {
+    "quit": _("退出"),
+    "markets": _("行情"),
+    "tasks": _("任务"),
+    "analyze": _("分析"),
+    "config": _("配置"),
+    "logs": _("日志"),
+    "next_module": _("下一模块"),
+    "refresh": _("刷新"),
+    "help": _("帮助"),
+    "toggle_theme": _("切换主题"),
+}
+
+# 主题 CSS
+_THEME_CSS = {
+    "dark": {
+        "screen_bg": "#1a1a2e",
+        "text": "#e0e0e0",
+    },
+    "light": {
+        "screen_bg": "#f5f5f5",
+        "text": "#212121",
+    },
+}
+
+
+def _build_bindings(keybindings: dict) -> list:
+    """从按键配置构建 Textual Binding 列表。
+
+    支持两种 action 格式：
+    - "switch(N)" / "next_module" 等 Textual 原生 action
+    - "module_N" 等自定义语义名称 → 通过 _ACTION_MAP 转换
+    """
+    bindings = []
+    for key, action_name in keybindings.items():
+        # 将配置中的 action 名称映射为实际的 Textual action
+        textual_action = _ACTION_MAP.get(action_name, action_name)
+        label = _ACTION_LABELS.get(action_name, action_name)
+        bindings.append(Binding(key, textual_action, label))
+    return bindings
+
+
+def _flatten_config_keybindings(keybindings: dict) -> dict:
+    """将嵌套格式的 keybindings 展平为 key->action_name 格式。
+
+    config.json 中的嵌套格式: {section: {action: key}}
+    展平后: {key: action_name} 用于 Textual Binding 构建。
+
+    对于多 section 中 key 冲突的情况，global section 优先。
+    """
+    flat = {}
+    # 先处理 global（最高优先级），再处理其他 section
+    section_order = ["global", "markets", "analysis", "tasks"]
+    for section in section_order:
+        if section in keybindings and isinstance(keybindings[section], dict):
+            for action_name, key in keybindings[section].items():
+                flat[key] = action_name
+    # 处理不在已知 section 列表中的 section
+    for section, bindings in keybindings.items():
+        if section not in section_order and isinstance(bindings, dict):
+            for action_name, key in bindings.items():
+                if key not in flat:
+                    flat[key] = action_name
+    return flat
+
 
 class HelpPanel(Static):
-    """帮助面板"""
-    def __init__(self, on_close):
+    """帮助面板 - 动态显示当前按键绑定"""
+    def __init__(self, on_close, keybindings: dict = None):
         self._on_close = on_close
-        content = f"""
-        {_('TUI 快捷键')}
-        {_('─────────────')}
-        {_('1-5     切换模块')}
-        {_('Tab     下一个模块')}
-        {_('r       刷新行情')}
-        {_('?       显示帮助')}
-        {_('q       退出')}
-
-        {_('按 ? 或 Escape 关闭')}
-        """
+        self._keybindings = keybindings or _DEFAULT_KEYBINDINGS
+        content = self._build_content()
         super().__init__(content=content)
         self.display = False
+
+    def _build_content(self) -> str:
+        """根据当前按键配置构建帮助文本"""
+        lines = [
+            _('TUI 快捷键'),
+            _('─────────────'),
+        ]
+        for key, action in self._keybindings.items():
+            label = _ACTION_LABELS.get(action, action)
+            display_key = key.upper() if len(key) == 1 else key.capitalize()
+            lines.append(f"{display_key:<8}{label}")
+        lines.extend([
+            "",
+            _('按 ? 或 Escape 关闭'),
+        ])
+        return "\n".join(lines)
+
+    def update_keybindings(self, keybindings: dict):
+        """热更新按键绑定显示"""
+        self._keybindings = keybindings
+        self.update(self._build_content())
 
     def on_key(self, event):
         if event.key == "?" or event.key == "escape":
@@ -47,50 +155,62 @@ def _make_analyze_callback(app: 'TUIApp'):
     """Create the on_analyze callback for AnalyzeView."""
     def on_analyze(stock_code: str, progress_callback=None):
         app._task_store.add_task(stock_code)
-        # Run analysis with progress callback
         if progress_callback:
             asyncio.create_task(app._run_analysis_with_progress(stock_code, progress_callback))
-        else:
-            # Fallback: just add to task store
-            pass
 
     return on_analyze
 
 
 class TUIApp(App):
-    BINDINGS = [
-        Binding("q", "quit", _("退出")),
-        Binding("1", "switch(0)", ""),
-        Binding("2", "switch(1)", ""),
-        Binding("3", "switch(2)", ""),
-        Binding("4", "switch(3)", ""),
-        Binding("5", "switch(4)", ""),
-        Binding("tab", "next_module", ""),
-        Binding("r", "refresh", _("刷新")),
-        Binding("?", "help", _("帮助")),
-    ]
     CSS = """
     Screen { background: #1a1a2e; }
+    Screen.light { background: #f5f5f5; }
     """
 
     def __init__(self, on_analyze_callback=None):
+        config = get_config()
+
+        # 从配置构建动态按键绑定（向后兼容：缺失时使用默认值）
+        kb = config.keybindings if config.keybindings else _DEFAULT_KEYBINDINGS
+
+        # 检测是否为新版嵌套格式 (section -> {action: key})
+        if isinstance(kb, dict) and kb and all(isinstance(v, dict) for v in kb.values()):
+            self._keybindings = _flatten_config_keybindings(kb)
+        else:
+            # 旧版 flat 格式 (key -> action) 或空
+            self._keybindings = dict(kb) if kb else dict(_DEFAULT_KEYBINDINGS)
+
+        # 确保 toggle_theme 键绑定存在
+        if "t" not in self._keybindings:
+            self._keybindings["t"] = "toggle_theme"
+
+        # 构建 BINDINGS
+        self.BINDINGS = _build_bindings(self._keybindings)
+
         super().__init__()
+
         self._client = ServiceClient()
         self._current = 0
         self._refresh_task: Optional[asyncio.Task] = None
         self._on_analyze_callback = on_analyze_callback or _make_analyze_callback(self)
-        config = get_config()
         self._markets = self._client.get_markets()
         self._dp = DataProviderWrapper(poll_interval=30)
         self._dp.set_stocks(config.stock_list)
         self._task_store = TaskStore()
         self._poll_timer: Timer | None = None
 
+        self._theme = config.theme or "dark"
+
         # 检测是否需要首次启动引导
         self._show_wizard = config.is_first_time_setup()
         self._wizard_completed = False
         self._wizard_skipped = False
         self._help_visible = False
+
+    def _get_theme_css(self) -> str:
+        """Get CSS variables for current theme."""
+        theme = _THEME_CSS.get(self._theme, _THEME_CSS["dark"])
+        return theme
 
     def compose(self):
         if self._show_wizard and not self._wizard_completed:
@@ -100,12 +220,11 @@ class TUIApp(App):
                 self._refresh_main_view()
             def on_wizard_skip():
                 self._wizard_completed = True
-                self._wizard_skipped = True  # 标记用户跳过了引导
-                self.action_switch(0)  # 进入 Markets
+                self._wizard_skipped = True
+                self.action_switch(0)
             yield WizardView(on_complete_callback=on_wizard_complete, on_skip_callback=on_wizard_skip)
             return
 
-        # 正常视图
         yield Header()
         yield Nav(active=0)
         yield Footer(last_update="---")
@@ -114,12 +233,56 @@ class TUIApp(App):
         yield AnalyzeView(self._on_analyze_callback)
         yield ConfigView()
         yield LogsView()
-        yield HelpPanel(self._close_help)
+        yield HelpPanel(self._close_help, self._keybindings)
 
     def on_mount(self):
         if self._show_wizard and not self._wizard_completed:
-            return  # Don't start polling during wizard
+            return
+        self._apply_theme()
         self._start_polling()
+
+    def _apply_theme(self):
+        """Apply current theme CSS to screen."""
+        theme = self._get_theme_css()
+        screen = self.screen
+        screen.styles.background = theme["screen_bg"]
+        # 设置 CSS class 以触发 Screen CSS 变量
+        if self._theme == "light":
+            screen.add_class("light")
+            screen.remove_class("dark")
+        else:
+            screen.add_class("dark")
+            screen.remove_class("light")
+
+    def action_toggle_theme(self):
+        """切换主题（dark <-> light）"""
+        self._theme = "light" if self._theme == "dark" else "dark"
+        self._apply_theme()
+
+        # 持久化到 config.json
+        config = get_config()
+        config.theme = self._theme
+        config.save_json_config({"theme": self._theme})
+
+        # 刷新导航和页脚颜色（它们有自己的样式）
+        try:
+            nav = self.query(Nav).first()
+            if nav:
+                nav.apply_theme(self._theme)
+        except Exception:
+            pass
+        try:
+            footer = self.query(Footer).first()
+            if footer:
+                footer.apply_theme(self._theme)
+        except Exception:
+            pass
+        try:
+            header = self.query(Header).first()
+            if header:
+                header.apply_theme(self._theme)
+        except Exception:
+            pass
 
     def _refresh_main_view(self):
         """刷新主视图（在引导完成后调用）"""
@@ -128,6 +291,7 @@ class TUIApp(App):
             widget.remove()
         for w in self.compose():
             self.mount(w)
+        self._apply_theme()
         self._start_polling()
 
     def _start_polling(self):
@@ -140,7 +304,7 @@ class TUIApp(App):
                 footer = self.query(Footer).first()
                 footer.set_last_update(self._dp.get_last_update() or "---")
             except Exception:
-                pass  # Ignore poll errors during view transitions
+                pass
 
         if self._poll_timer:
             self._poll_timer.stop()

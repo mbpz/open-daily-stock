@@ -241,6 +241,12 @@ def parse_arguments() -> argparse.Namespace:
         help='刷新所有股票数据并重新分析'
     )
 
+    parser.add_argument(
+        '--ws-server',
+        action='store_true',
+        help='Run DataService as WebSocket server (for remote clients)'
+    )
+
     return parser.parse_args()
 
 
@@ -363,6 +369,22 @@ def main() -> int:
     if not os.path.exists("config.json"):
         from src.setup_wizard import run_wizard
         run_wizard()
+
+    # === WebSocket 服务器模式（在启动 DataService 子进程前处理）===
+    if args.ws_server:
+        from src.data_service import DataService
+        from src.config import get_config
+
+        config = get_config()
+        setup_logging(debug=args.debug, log_dir=config.log_dir)
+        logger.info("模式: WebSocket 服务器")
+        logger.info(f"监听地址: ws://{config.ws_server_host}:{config.ws_server_port}")
+
+        service = DataService()
+        return service.run_ws_server(
+            host=config.ws_server_host,
+            port=config.ws_server_port,
+        )
 
     # 启动 DataService
     start_data_service()

@@ -25,6 +25,7 @@ from tenacity import (
 )
 
 from src.config import get_config
+from src.cn_prompts import CNPromptBuilder, CN_ANALYST_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -496,6 +497,8 @@ class GeminiAnalyzer:
         self._using_fallback = False  # 是否正在使用备选模型
         self._use_openai = False  # 是否使用 OpenAI 兼容 API
         self._openai_client = None  # OpenAI 客户端
+        self._system_prompt = self.SYSTEM_PROMPT  # Current system prompt (may be CN override)
+        self._cn_mode = False  # Whether to use A-share specific CN prompts
         
         # 检查 Gemini API Key 是否有效（过滤占位符）
         gemini_key_valid = self._api_key and not self._api_key.startswith('your_') and len(self._api_key) > 10
@@ -595,7 +598,7 @@ class GeminiAnalyzer:
             try:
                 self._model = genai.GenerativeModel(
                     model_name=model_name,
-                    system_instruction=self.SYSTEM_PROMPT,
+                    system_instruction=self._system_prompt,
                 )
                 self._current_model_name = model_name
                 self._using_fallback = False
@@ -605,7 +608,7 @@ class GeminiAnalyzer:
                 logger.warning(f"主模型 {model_name} 初始化失败: {model_error}，尝试备选模型 {fallback_model}")
                 self._model = genai.GenerativeModel(
                     model_name=fallback_model,
-                    system_instruction=self.SYSTEM_PROMPT,
+                    system_instruction=self._system_prompt,
                 )
                 self._current_model_name = fallback_model
                 self._using_fallback = True
@@ -630,7 +633,7 @@ class GeminiAnalyzer:
             logger.warning(f"[LLM] 切换到备选模型: {fallback_model}")
             self._model = genai.GenerativeModel(
                 model_name=fallback_model,
-                system_instruction=self.SYSTEM_PROMPT,
+                system_instruction=self._system_prompt,
             )
             self._current_model_name = fallback_model
             self._using_fallback = True
@@ -671,7 +674,7 @@ class GeminiAnalyzer:
                 response = self._openai_client.chat.completions.create(
                     model=self._current_model_name,
                     messages=[
-                        {"role": "system", "content": self.SYSTEM_PROMPT},
+                        {"role": "system", "content": self._system_prompt},
                         {"role": "user", "content": prompt}
                     ],
                     temperature=generation_config.get('temperature', config.openai_temperature),
@@ -845,8 +848,28 @@ class GeminiAnalyzer:
             )
         
         try:
-            # 格式化输入（包含技术面数据和新闻）
-            prompt = self._format_prompt(context, name, news_context)
+            # === Determine market and set appropriate prompts ===
+            # CN market detection: explicit market field OR 6-digit numeric code
+            is_cn = (
+                context.get("market") == "CN"
+                or (code.isdigit() and len(code) == 6)
+            )
+            self._cn_mode = is_cn
+            if is_cn:
+                self._system_prompt = CN_ANALYST_SYSTEM_PROMPT
+            else:
+                self._system_prompt = self.SYSTEM_PROMPT
+
+            # Format input (includes technical data + news)
+            if self._cn_mode:
+                prompt = CNPromptBuilder.build_analysis_prompt(
+                    context,
+                    inst_context="",
+                    news_context=news_context or "",
+                    industry_context="",
+                )
+            else:
+                prompt = self._format_prompt(context, name, news_context)
             
             # 获取模型名称
             model_name = getattr(self, '_current_model_name', None)

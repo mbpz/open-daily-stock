@@ -32,6 +32,10 @@ def format_volume(v: float, code: str = None) -> str:
     """
     if v is None:
         return "—"
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return str(v)
     # Determine market type based on code if provided
     if code is not None:
         if code.startswith('hk') or (len(code) == 6 and code.isdigit() and not code.startswith('9')):

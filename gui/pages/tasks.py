@@ -49,41 +49,73 @@ class TasksPage(ft.Container):
             padding=10,
         )
 
+    def _normalize(self, record):
+        """Convert DB or TaskStore record to normalized dict."""
+        if hasattr(record, 'to_dict'):
+            d = record.to_dict()
+            return {
+                'code': d.get('code', ''),
+                'status': str(d.get('status', '')).upper(),
+                'timestamp': d.get('timestamp', 'N/A') or 'N/A',
+                'result': d.get('result_json') or d.get('result'),
+                '_record': record,
+            }
+        code = getattr(record, 'code', '')
+        status_val = getattr(record, 'status', '')
+        if hasattr(status_val, 'upper'):
+            status_str = str(status_val).upper()
+        elif hasattr(status_val, 'name'):
+            status_str = str(status_val.name).upper()
+        else:
+            status_str = str(status_val).upper()
+        timestamp_val = getattr(record, 'timestamp', None)
+        if hasattr(timestamp_val, 'strftime'):
+            timestamp_str = timestamp_val.strftime("%Y-%m-%d %H:%M")
+        elif isinstance(timestamp_val, str):
+            timestamp_str = timestamp_val
+        else:
+            timestamp_str = "N/A"
+        result_val = getattr(record, 'result_json', None) or getattr(record, 'result', None)
+        return {
+            'code': code,
+            'status': status_str,
+            'timestamp': timestamp_str,
+            'result': result_val,
+            '_record': record,
+        }
+
     def _load_tasks(self):
         """加载任务历史"""
-        # Clear existing controls
         self.task_list.controls.clear()
 
-        # Load from database
-        try:
-            history_records = self._db.get_analysis_history(limit=100)
-        except Exception as e:
-            # Fallback to task_store if database fails
-            history_records = []
+        if self.task_store is not None:
+            history_records = self.task_store.get_tasks()
+        else:
+            try:
+                history_records = self._db.get_analysis_history(limit=100)
+            except Exception as e:
+                history_records = []
 
         if history_records:
             for record in history_records:
-                status_str = record.status.upper()
+                r = self._normalize(record)
+                status_str = r['status']
                 status_icon = STATUS_ICONS.get(status_str, "❓")
                 status_color = STATUS_COLORS.get(status_str, TEXT_SECONDARY)
 
-                # Parse result JSON if available
                 result_text = ""
-                if record.result_json:
+                if r['result']:
                     try:
-                        result_data = json.loads(record.result_json)
+                        result_data = json.loads(r['result'])
                         result_text = f"{result_data.get('operation_advice', 'N/A')} | 评分: {result_data.get('sentiment_score', 'N/A')}"
-                    except:
-                        result_text = record.result_json[:50] if len(record.result_json) > 50 else record.result_json
-
-                # Format timestamp
-                timestamp_str = record.timestamp.strftime("%Y-%m-%d %H:%M") if record.timestamp else "N/A"
+                    except Exception:
+                        result_text = str(r['result'])[:50]
 
                 card_content = ft.Column([
                     ft.Row([
                         ft.Column([
-                            ft.Text(f"{record.code}", weight=ft.FontWeight.BOLD),
-                            ft.Text(timestamp_str, color=TEXT_SECONDARY, size=12),
+                            ft.Text(f"{r['code']}", weight=ft.FontWeight.BOLD),
+                            ft.Text(r['timestamp'], color=TEXT_SECONDARY, size=12),
                         ]),
                         ft.Container(expand=True),
                         ft.Container(
@@ -95,19 +127,17 @@ class TasksPage(ft.Container):
                     ]),
                 ])
 
-                # Add result info if available
                 if result_text:
                     card_content.controls.append(
                         ft.Text(f"Result: {result_text}", size=12)
                     )
 
-                # Make card clickable to show detail
                 card = ft.Container(
                     content=card_content,
                     padding=15,
                     bgcolor=CARD_BG,
                     border_radius=10,
-                    on_click=lambda e, r=record: self._show_result_detail(r),
+                    on_click=lambda e, r=r['_record']: self._show_result_detail(r),
                 )
                 self.task_list.controls.append(card)
         else:

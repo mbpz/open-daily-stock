@@ -128,5 +128,21 @@
     "not_configured": "(not configured)",
     "settings_saved_to_env": "Settings saved to .env",
     "save_failed_error": "Save failed",
-    "nothing_to_save": "Nothing to save"
+    "nothing_to_save": "Nothing to save",
+    "财务报表": "Financial Statements",
+    "利润表": "Income Statement",
+    "资产负债表": "Balance Sheet",
+    "现金流量表": "Cash Flow Statement",
+    "报表类型": "Statement Type",
+    "查询": "Query",
+    "项目": "Item",
+    "输入股票代码查询财务报表": "Enter stock code to query financial statements",
+    "正在查询...": "Querying...",
+    "查询失败": "Query failed",
+    "无财务数据": "No financial data",
+    "查询失败: ": "Query failed: ",
+    "单位: 亿元": "Unit: 100 million",
+    "正值=收入/流入，负值=支出/流出": "Positive=income/inflow, negative=expense/outflow",
+    "查询结果:": "Query results:",
+    "请输入股票代码": "Please enter stock code"
 }
