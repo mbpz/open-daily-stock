@@ -50,6 +50,8 @@ class DataService:
             "remove_position": "_handle_remove_position",
             "update_position": "_handle_update_position",
             "get_positions": "_handle_get_positions",
+            "get_institutional": "_handle_get_institutional",
+            "get_dragon_board": "_handle_get_dragon_board",
             "quit": "_handle_quit",
         }
 
@@ -469,6 +471,36 @@ class DataService:
         except Exception as e:
             logger.error(f"获取持仓失败: {e}")
             return {"status": "error", "message": f"获取持仓失败: {str(e)}"}
+
+    # === Institutional Activity Handlers ===
+
+    def _handle_get_institutional(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """获取机构动向追踪数据（大股东增减持 + 机构调研）"""
+        code = req.get("code")
+        if not code:
+            return {"status": "error", "message": "缺少股票代码 code 参数"}
+
+        try:
+            from src.institutional import get_institutional_summary
+            data = get_institutional_summary(code)
+            return {"status": "ok", "data": data}
+
+        except Exception as e:
+            logger.error(f"获取机构动向失败 [{code}]: {e}")
+            return {"status": "error", "message": f"获取机构动向失败: {str(e)}"}
+
+    def _handle_get_dragon_board(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """获取龙虎榜数据"""
+        date = req.get("date")  # 可选参数
+
+        try:
+            from src.institutional import get_dragon_board
+            data = get_dragon_board(date=date)
+            return {"status": "ok", "data": data}
+
+        except Exception as e:
+            logger.error(f"获取龙虎榜失败: {e}")
+            return {"status": "error", "message": f"获取龙虎榜失败: {str(e)}"}
 
     # === Existing Helper Methods ===
 
