@@ -4,19 +4,108 @@ import sys
 import sqlite3
 import logging
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Callable
 
 from .config import get_config
 from .alert_service import AlertService
 
 logger = logging.getLogger(__name__)
 
+
+# Action handler type: takes request dict, returns response dict
+ActionHandler = Callable[[Dict[str, Any]], Dict[str, Any]]
+
+
 class DataService:
+    """
+    DataService 后端守护进程
+
+    使用 action registry 模式分发请求到各 handler。
+    每个 handler 是类的一个方法，接受 request dict，返回 response dict。
+    """
+
     def __init__(self):
         self._running = True
         self._db_path = ".open-daily-stock.db"
         self._init_db()
         self._alert_service = AlertService()
+
+        # === Action Registry ===
+        # 映射 action name -> handler method name
+        self._actions: Dict[str, str] = {
+            "hello": "_handle_hello",
+            "get_markets": "_handle_get_markets",
+            "refresh": "_handle_refresh",
+            "analyze": "_handle_analyze",
+            "get_history": "_handle_get_history",
+            "search_news": "_handle_search_news",
+            "get_tasks": "_handle_get_tasks",
+            "get_task": "_handle_get_task",
+            "cancel_task": "_handle_cancel_task",
+            "quit": "_handle_quit",
+        }
+
+        # Task storage for async operations
+        self._tasks: Dict[str, Dict[str, Any]] = {}
+
+    def _handle_request(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """根据 action 分发到对应 handler"""
+        action = req.get("action", "")
+
+        if action not in self._actions:
+            return {"status": "error", "message": f"不支持的操作: {action}"}
+
+        handler_name = self._actions[action]
+        handler: ActionHandler = getattr(self, handler_name)
+        return handler(req)
+
+    # === Existing Handlers ===
+
+    def _handle_hello(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        return {"status": "ok", "version": "0.4.0"}
+
+    def _handle_get_markets(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            markets = self._get_markets()
+            return {"status": "ok", "data": markets}
+        except Exception as e:
+            logger.error(f"获取行情失败: {e}")
+            return {"status": "error", "message": "获取行情失败，请稍后重试"}
+
+    def _handle_refresh(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            self._refresh_markets()
+            self._check_alerts()
+            return {"status": "ok", "message": "刷新完成"}
+        except Exception as e:
+            logger.error(f"刷新行情失败: {e}")
+            return {"status": "error", "message": "刷新失败，请检查网络连接"}
+
+    def _handle_quit(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        self._running = False
+        return {"status": "ok", "message": "退出"}
+
+    # === Stub Handlers for New Actions ===
+
+    def _handle_analyze(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        return {"status": "error", "message": "not implemented yet"}
+
+    def _handle_get_history(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        return {"status": "error", "message": "not implemented yet"}
+
+    def _handle_search_news(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        return {"status": "error", "message": "not implemented yet"}
+
+    def _handle_get_tasks(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        return {"status": "error", "message": "not implemented yet"}
+
+    def _handle_get_task(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        return {"status": "error", "message": "not implemented yet"}
+
+    def _handle_cancel_task(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        return {"status": "error", "message": "not implemented yet"}
+
+    # === Existing Helper Methods ===
 
     def _init_db(self):
         """初始化 SQLite 数据库"""
@@ -38,32 +127,6 @@ class DataService:
     def _send(self, data: Dict[str, Any]):
         """发送 JSON 到 stdout"""
         print(json.dumps(data), flush=True)
-
-    def _handle_request(self, req: Dict[str, Any]):
-        """处理请求"""
-        action = req.get("action", "")
-
-        if action == "hello":
-            self._send({"status": "ok", "version": "0.3.0"})
-        elif action == "get_markets":
-            try:
-                markets = self._get_markets()
-                self._send({"status": "ok", "data": markets})
-            except Exception as e:
-                logger.error(f"获取行情失败: {e}")
-                self._send({"status": "error", "message": "获取行情失败，请稍后重试"})
-        elif action == "refresh":
-            try:
-                self._refresh_markets()
-                self._check_alerts()
-                self._send({"status": "ok", "message": "刷新完成"})
-            except Exception as e:
-                logger.error(f"刷新行情失败: {e}")
-                self._send({"status": "error", "message": "刷新失败，请检查网络连接"})
-        elif action == "quit":
-            self._running = False
-        else:
-            self._send({"status": "error", "message": f"不支持的操作: {action}"})
 
     def _get_markets(self) -> List[Dict]:
         """从数据库获取行情数据"""
@@ -172,7 +235,8 @@ class DataService:
                 break
             try:
                 req = json.loads(line)
-                self._handle_request(req)
+                resp = self._handle_request(req)
+                self._send(resp)
             except json.JSONDecodeError:
                 self._send({"status": "error", "message": "invalid json"})
             except Exception as e:

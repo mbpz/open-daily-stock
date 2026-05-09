@@ -46,3 +46,41 @@ class TestDataService:
         proc.terminate()
         assert resp.get("status") == "ok"
         assert "data" in resp
+
+
+class TestDataServiceActionRegistry:
+    """Test that DataService dispatches to correct handlers"""
+
+    def test_hello_returns_version(self):
+        from src.data_service import DataService
+        service = DataService()
+        result = service._handle_request({"action": "hello"})
+        assert result["status"] == "ok"
+        assert "version" in result
+
+    def test_unknown_action_returns_error(self):
+        from src.data_service import DataService
+        service = DataService()
+        result = service._handle_request({"action": "nonexistent"})
+        assert result["status"] == "error"
+        assert "不支持" in result["message"]
+
+    def test_action_registry_has_analyze(self):
+        from src.data_service import DataService
+        service = DataService()
+        assert hasattr(service, '_handle_analyze')
+
+    def test_action_registry_has_get_history(self):
+        from src.data_service import DataService
+        service = DataService()
+        assert hasattr(service, '_handle_get_history')
+
+    def test_action_registry_has_search_news(self):
+        from src.data_service import DataService
+        service = DataService()
+        assert hasattr(service, '_handle_search_news')
+
+    def test_action_registry_has_get_tasks(self):
+        from src.data_service import DataService
+        service = DataService()
+        assert hasattr(service, '_handle_get_tasks')
