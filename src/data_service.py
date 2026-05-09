@@ -136,8 +136,8 @@ class DataService:
                 self._tasks[task_id]["status"] = "running"
 
             # 获取分析上下文
-            from src.storage import get_analysis_context
-            context = get_analysis_context(code)
+            from src.storage import get_db
+            context = get_db().get_analysis_context(code)
 
             # 执行 AI 分析
             from src.analyzer import GeminiAnalyzer
