@@ -1,21 +1,37 @@
 # open-daily-stock
 
-A 股/港股/美股自选股智能分析系统，**本地 PC 端 TUI + GUI 双模式应用**。
+A 股/港股/美股自选股智能分析系统，**本地 PC 端 TUI + GUI 双模式应用**，你的数据只存在你的电脑里。
 
-## 功能特性
+## 项目简介
 
-- **TUI 界面** — 终端交互，行情 30s 自动轮询
-- **GUI 界面** — Flet 图形界面，点击操作，无需终端
-- **双模式并行** — TUI 和 GUI 功能完全对等，用户可选
-- **多数据源** — AkShare（免费 A 股）、YFinance（港美股）
-- **AI 分析** — Google Gemini / OpenAI 兼容 API（DeepSeek/通义等）
-- **多渠道推送** — 企业微信、飞书、Telegram、邮件、Discord
-- **持仓管理** — 成本盈亏自动计算，收益率实时展示
-- **K线回放** — 历史行情蜡烛图，支持 MA5/MA10/MA20
-- **机构追踪** — 大股东增减持、机构调研、龙虎榜
-- **简易回测** — 日线级 MA 交叉策略回测，收益率/最大回撤/夏普比率
-- **一键安装** — PyInstaller 打包，用户下载即用
-- **自动更新** — GitHub Releases 检查，GUI 一键升级
+open-daily-stock 是一款面向个人投资者的本地股票分析工具，集成行情追踪、AI 分析、持仓管理、K线回放、机构追踪和策略回测。基于 AkShare + YFinance 免费数据源，支持企业微信、飞书、Telegram 多渠道推送通知。开源免费，本地优先 — 对比雪球/同花顺的云端模式，真正保护你的数据隐私。
+
+## 核心功能
+
+| 功能 | 说明 |
+|------|------|
+| :chart_with_upwards_trend: **TUI + GUI 双模式** | Textual 终端界面 / Flet 图形界面，功能完全对等 |
+| :phone: **三市行情** | A股(akshare)/港股/美股(yfinance)，30s 自动轮询 |
+| :robot: **AI 智能分析** | Gemini + OpenAI fallback，决策仪表盘输出 |
+| :bell: **多渠道通知** | 企业微信/飞书/Telegram/邮件/Discord |
+| :bank: **持仓管理** | 成本盈亏自动计算，实时收益率展示 |
+| :chart: **K线回放** | mplfinance 蜡烛图，MA5/MA10/MA20 |
+| :mag: **机构追踪** | 大股东增减持、机构调研、龙虎榜 |
+| :arrows_counterclockwise: **策略回测** | MA 交叉策略，收益率/最大回撤/夏普比率 |
+| :arrow_down: **一键安装** | PyInstaller 打包，下载即用，自动更新 |
+
+## 竞品对比
+
+| 产品 | 价格 | 本地优先 | TUI | GUI | AI分析 | A股 | 开源 |
+|------|:----:|:--------:|:---:|:---:|:------:|:---:|:----:|
+| **open-daily-stock** | 免费 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 雪球 | 免费/付费 | ❌ | ❌ | ✅ | 基础 | ✅ | ❌ |
+| 同花顺 | 免费/付费 | ❌ | ✅ | ✅ | 基础 | ✅ | ❌ |
+| 富途牛牛 | ¥180/年 | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| TradingView | $15/月 | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| Backtrader | 免费 | ✅ | ✅ | ❌ | ❌ | 有限 | ✅ |
+
+**open-daily-stock 独占优势:** 本地优先 + 开源 + TUI/GUI双模式 + AI分析 + A股覆盖
 
 ## 快速开始
 
@@ -149,10 +165,25 @@ open-daily-stock/
 }
 ```
 
+## 技术栈
+
+| 组件 | 技术 |
+|------|------|
+| TUI 框架 | Textual |
+| GUI 框架 | Flet >= 0.25 |
+| 数据获取 | AkShare、YFinance |
+| AI 分析 | Google Gemini / OpenAI 兼容 API |
+| 数据库 | SQLite + SQLAlchemy ORM |
+| 进程通信 | stdio JSON |
+| 图表 | mplfinance (K线) |
+| 打包 | PyInstaller |
+
 ## 文档
 
 - [ROADMAP.md](ROADMAP.md) — 功能规划
 - [DESIGN.md](DESIGN.md) — 架构设计
+- [docs/COMPETITOR_ANALYSIS.md](docs/COMPETITOR_ANALYSIS.md) — 竞品对比分析
+- [docs/adr/](docs/adr/) — 架构决策记录
 
 ## License
 

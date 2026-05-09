@@ -2,83 +2,14 @@
 from textual.widgets import Static
 from tui.data.wrapper import DataProviderWrapper, MarketData
 from src.i18n import _
-from datetime import datetime, timezone, timedelta
+from src.shared.style import format_volume as _format_volume
+from src.shared.market_status import get_all_market_statuses, MarketStatus
 
 
-def get_market_status() -> dict:
-    """Get market status for A股, HK, US markets"""
-    now = datetime.now()
-    cn_tz = timezone(timedelta(hours=8))
-    now_cn = now.astimezone(cn_tz)
-    current_time = now_cn.strftime("%H:%M")
-    day_of_week = now_cn.weekday()  # 0=Monday, 6=Sunday
-
-    status = {}
-
-    # A股: 9:30-11:30, 13:00-15:00 CST (Mon-Fri)
-    if day_of_week < 5:
-        if "09:30" <= current_time <= "11:30" or "13:00" <= current_time <= "15:00":
-            status['A股'] = ('🟢', '交易中')
-        elif "09:00" <= current_time < "09:30" or "11:30" < current_time < "13:00":
-            status['A股'] = ('🟡', '盘前')
-        else:
-            status['A股'] = ('⚪', '已休市')
-    else:
-        status['A股'] = ('⚪', '已休市')
-
-    # HK: 9:30-12:00, 13:00-16:00 HKT (Mon-Fri)
-    hk_tz = timezone(timedelta(hours=9))
-    now_hk = now.astimezone(hk_tz)
-    hk_time = now_hk.strftime("%H:%M")
-    if day_of_week < 5:
-        if "09:30" <= hk_time <= "12:00" or "13:00" <= hk_time <= "16:00":
-            status['港股'] = ('🟢', '交易中')
-        elif "09:00" <= hk_time < "09:30" or "12:00" < hk_time < "13:00":
-            status['港股'] = ('🟡', '盘前')
-        else:
-            status['港股'] = ('⚪', '已休市')
-    else:
-        status['港股'] = ('⚪', '已休市')
-
-    # US: 9:30-16:00 EST (Mon-Fri)
-    est_tz = timezone(timedelta(hours=-5))
-    now_est = now.astimezone(est_tz)
-    us_time = now_est.strftime("%H:%M")
-    if day_of_week < 5:
-        if "09:30" <= us_time <= "16:00":
-            status['美股'] = ('🟢', '交易中')
-        elif "04:00" <= us_time < "09:30":
-            status['美股'] = ('🟡', '盘前')
-        else:
-            status['美股'] = ('⚪', '已休市')
-    else:
-        status['美股'] = ('⚪', '已休市')
-
-    return status
-
-
-def _format_volume_display(vol, code: str) -> str:
-    """Format volume to wanyij unit."""
-    try:
-        v = float(vol)
-        # A股/港股 use 万 (ten thousands)
-        if code.startswith('hk') or (len(code) == 6 and code.isdigit() and not code.startswith('9')):
-            if v >= 100000000:
-                return f"{v/100000000:.1f}亿"
-            elif v >= 10000:
-                return f"{v/10000:.0f}万"
-            return f"{v:.0f}"
-        else:
-            # US stocks use M/B notation
-            if v >= 1000000000:
-                return f"{v/1000000000:.1f}B"
-            elif v >= 1000000:
-                return f"{v/1000000:.1f}M"
-            elif v >= 1000:
-                return f"{v/1000:.1f}K"
-            return f"{v:.0f}"
-    except (ValueError, TypeError):
-        return "---"
+def get_market_status_legacy() -> dict:
+    """Get market status for A股, HK, US markets - legacy function."""
+    status_dict = get_all_market_statuses()
+    return {market: (emoji, text) for market, (emoji, text) in status_dict.items()}
 
 
 class MarketsView(Static):
@@ -91,7 +22,7 @@ class MarketsView(Static):
 
     def compose(self):
         # Market status indicators
-        status = get_market_status()
+        status = get_market_status_legacy()
         status_line = "  " + "  ".join([f"{e} {m}" for m, (e, _) in status.items()])
 
         app = self.app
@@ -111,7 +42,7 @@ class MarketsView(Static):
         for code, m in data.items():
             emoji = "🟢" if m.change > 0 else "🔴" if m.change < 0 else "⚪"
             sign = "+" if m.change > 0 else ""
-            volume_str = _format_volume_display(m.volume, code)
+            volume_str = _format_volume(m.volume, code)
 
             # Check for price change flash
             prev_price = self._previous_prices.get(code)

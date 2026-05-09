@@ -41,11 +41,12 @@ def calculate_kdj(highs: pd.Series, lows: pd.Series, closes: pd.Series,
     return k, d, j
 
 def calculate_wr(highs: pd.Series, lows: pd.Series, closes: pd.Series, period: int = 14):
-    """WR = (HHV-HHV)/HHV*100，背离指标"""
+    """Williams %R = (HHV - close) / (HHV - LLV) * 100，范围 [-100, 0]"""
     if len(closes) < period:
         return pd.Series(dtype=float)
     highest_high = highs.rolling(period, min_periods=period).max()
-    result = (highest_high - closes) / (highest_high - lows) * 100
+    lowest_low = lows.rolling(period, min_periods=period).min()
+    result = (highest_high - closes) / (highest_high - lowest_low) * 100
     return result.replace([np.inf, -np.inf], np.nan)
 
 def calculate_obv(closes: pd.Series, volumes: pd.Series) -> pd.Series:

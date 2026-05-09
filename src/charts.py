@@ -84,15 +84,20 @@ def convert_history_to_df(history_data: List[Dict[str, Any]]) -> Optional[pd.Dat
     Returns:
         DataFrame with Date index and OHLCV columns, or None if data is empty
     """
-    if not history_data:
+    if history_data is None or len(history_data) == 0:
         return None
 
     df = pd.DataFrame(history_data)
 
-    # 确保日期列是 datetime 类型并设为索引
-    if "date" in df.columns:
-        df["date"] = pd.to_datetime(df["date"])
-        df.set_index("date", inplace=True)
+    # Determine date column (case-insensitive check)
+    date_col = None
+    for col in df.columns:
+        if col.lower() == "date":
+            date_col = col
+            break
+    if date_col:
+        df[date_col] = pd.to_datetime(df[date_col])
+        df.set_index(date_col, inplace=True)
 
     # 重命名列为 mplfinance 需要的格式
     column_mapping = {

@@ -160,9 +160,10 @@ class AnalyzePage(ft.Container):
 
     def _format_result(self, result) -> str:
         """Format analysis result for display"""
-        # Determine verdict
+        # Determine verdict based on sentiment_score
+        # 看涨: >=70, 中性: 40-69, 看跌: <40
         score = result.sentiment_score or 50
-        if score >= 60:
+        if score >= 70:
             verdict = _("看涨")
             verdict_color = SUCCESS_COLOR
         elif score >= 40:
