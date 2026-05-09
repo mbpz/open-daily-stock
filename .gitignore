@@ -8,8 +8,8 @@
 # 用户配置文件（包含 API keys，禁止提交）
 config.json
 
-# 测试文件（可能包含敏感配置）
-test_*.py
+# 测试文件（可能包含敏感配置，禁止提交根目录临时测试脚本）
+/test_*.py
 !test_env.py
 tests/.env.test
 
