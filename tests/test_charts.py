@@ -115,6 +115,180 @@ class TestKlineChartCreation:
             assert size > 1000  # PNG should be at least 1KB
 
 
+class TestTechnicalIndicators:
+    """Test technical indicator calculations."""
+
+    def test_calculate_rsi(self):
+        from src.charts import convert_history_to_df, calculate_rsi
+
+        data = _make_history_data(30)
+        df = convert_history_to_df(data)
+        rsi = calculate_rsi(df)
+
+        # RSI should be a Series with proper length
+        assert len(rsi) == len(df)
+        # RSI should be between 0 and 100
+        valid_rsi = rsi.dropna()
+        assert all((valid_rsi >= 0) & (valid_rsi <= 100))
+
+    def test_calculate_macd(self):
+        from src.charts import convert_history_to_df, calculate_macd
+
+        data = _make_history_data(30)
+        df = convert_history_to_df(data)
+        macd_df = calculate_macd(df)
+
+        assert "MACD" in macd_df.columns
+        assert "DIF" in macd_df.columns
+        assert "DEA" in macd_df.columns
+
+    def test_calculate_bollinger_bands(self):
+        from src.charts import convert_history_to_df, calculate_bollinger_bands
+
+        data = _make_history_data(30)
+        df = convert_history_to_df(data)
+        bb_df = calculate_bollinger_bands(df)
+
+        assert "BB_UPPER" in bb_df.columns
+        assert "BB_MIDDLE" in bb_df.columns
+        assert "BB_LOWER" in bb_df.columns
+        # Upper should be >= middle, middle >= lower
+        valid = bb_df.dropna()
+        assert all(valid["BB_UPPER"] >= valid["BB_MIDDLE"])
+        assert all(valid["BB_MIDDLE"] >= valid["BB_LOWER"])
+
+    def test_calculate_kdj(self):
+        from src.charts import convert_history_to_df, calculate_kdj
+
+        data = _make_history_data(30)
+        df = convert_history_to_df(data)
+        kdj_df = calculate_kdj(df)
+
+        assert "K" in kdj_df.columns
+        assert "D" in kdj_df.columns
+        assert "J" in kdj_df.columns
+
+    def test_calculate_wr(self):
+        from src.charts import convert_history_to_df, calculate_wr
+
+        data = _make_history_data(30)
+        df = convert_history_to_df(data)
+        wr = calculate_wr(df)
+
+        # WR should be between -100 and 0
+        valid_wr = wr.dropna()
+        assert all((valid_wr >= -100) & (valid_wr <= 0))
+
+    def test_calculate_obv(self):
+        from src.charts import convert_history_to_df, calculate_obv
+
+        data = _make_history_data(30)
+        df = convert_history_to_df(data)
+        obv = calculate_obv(df)
+
+        # OBV should be numeric and non-decreasing generally
+        assert len(obv) == len(df)
+        assert obv.dtype in ["float64", "float32", "int64", "int32"]
+
+    def test_add_indicators(self):
+        from src.charts import convert_history_to_df, add_indicators
+
+        data = _make_history_data(60)
+        df = convert_history_to_df(data)
+        result = add_indicators(df, ["rsi", "macd", "bollinger", "kdj", "wr", "obv"])
+
+        assert "RSI" in result.columns
+        assert "MACD" in result.columns
+        assert "DIF" in result.columns
+        assert "DEA" in result.columns
+        assert "BB_UPPER" in result.columns
+        assert "BB_LOWER" in result.columns
+        assert "K" in result.columns
+        assert "D" in result.columns
+        assert "J" in result.columns
+        assert "WR" in result.columns
+        assert "OBV" in result.columns
+
+
+class TestKlineChartWithIndicators:
+    """Test K-line chart creation with technical indicators."""
+
+    def test_create_kline_chart_with_rsi_indicator(self):
+        from src.charts import create_kline_chart
+
+        data = _make_history_data(60)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = create_kline_chart(data, "600519", days=30, output_dir=tmpdir, indicators=["rsi"])
+            assert os.path.exists(path)
+            assert path.endswith(".png")
+
+    def test_create_kline_chart_with_macd_indicator(self):
+        from src.charts import create_kline_chart
+
+        data = _make_history_data(60)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = create_kline_chart(data, "600519", days=30, output_dir=tmpdir, indicators=["macd"])
+            assert os.path.exists(path)
+            assert path.endswith(".png")
+
+    def test_create_kline_chart_with_bollinger_indicator(self):
+        from src.charts import create_kline_chart
+
+        data = _make_history_data(60)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = create_kline_chart(data, "600519", days=30, output_dir=tmpdir, indicators=["bollinger"])
+            assert os.path.exists(path)
+            assert path.endswith(".png")
+
+    def test_create_kline_chart_with_kdj_indicator(self):
+        from src.charts import create_kline_chart
+
+        data = _make_history_data(60)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = create_kline_chart(data, "600519", days=30, output_dir=tmpdir, indicators=["kdj"])
+            assert os.path.exists(path)
+            assert path.endswith(".png")
+
+    def test_create_kline_chart_with_wr_indicator(self):
+        from src.charts import create_kline_chart
+
+        data = _make_history_data(60)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = create_kline_chart(data, "600519", days=30, output_dir=tmpdir, indicators=["wr"])
+            assert os.path.exists(path)
+            assert path.endswith(".png")
+
+    def test_create_kline_chart_with_obv_indicator(self):
+        from src.charts import create_kline_chart
+
+        data = _make_history_data(60)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = create_kline_chart(data, "600519", days=30, output_dir=tmpdir, indicators=["obv"])
+            assert os.path.exists(path)
+            assert path.endswith(".png")
+
+    def test_create_kline_chart_with_multiple_indicators(self):
+        from src.charts import create_kline_chart
+
+        data = _make_history_data(60)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = create_kline_chart(
+                data, "600519", days=30, output_dir=tmpdir,
+                indicators=["rsi", "macd", "bollinger", "kdj", "wr", "obv"]
+            )
+            assert os.path.exists(path)
+            assert path.endswith(".png")
+            # File should be larger with multiple indicators
+            assert os.path.getsize(path) > 1000
+
+
 class TestDataServiceGetKlineData:
     """Test DataService get_kline_data action."""
 
@@ -144,3 +318,29 @@ class TestDataServiceGetKlineData:
         })
         assert result["status"] == "ok"
         assert "image_path" in result
+
+
+class TestDataServiceGetIndicators:
+    """Test DataService get_indicators action."""
+
+    def test_get_indicators_action_exists(self):
+        from src.data_service import DataService
+        service = DataService()
+        assert "get_indicators" in service._actions
+
+    def test_get_indicators_action_handler(self):
+        from src.data_service import DataService
+        service = DataService()
+        assert service._actions["get_indicators"] == "_handle_get_indicators"
+
+    def test_get_indicators_missing_code(self):
+        from src.data_service import DataService
+        service = DataService()
+        result = service._handle_request({"action": "get_indicators", "indicator_names": ["rsi"]})
+        assert result["status"] == "error"
+
+    def test_get_indicators_missing_indicator_names(self):
+        from src.data_service import DataService
+        service = DataService()
+        result = service._handle_request({"action": "get_indicators", "code": "600519"})
+        assert result["status"] == "error"

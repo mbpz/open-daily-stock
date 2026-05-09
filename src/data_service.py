@@ -1,16 +1,16 @@
 """DataService 后端守护进程"""
 import json
 import sys
-import sqlite3
 import logging
 import threading
 import uuid
 from datetime import datetime, date
 from typing import Dict, Any, List, Optional, Callable
 
+import sqlite3
 from .config import get_config
 from .alert_service import AlertService
-from .portfolio import Position
+from .storage import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,8 @@ class DataService:
     def __init__(self):
         self._running = True
         self._db_path = ".open-daily-stock.db"
-        self._init_db()
+        # Initialize database via storage.py (ensures schema tables exist)
+        get_db()
         self._alert_service = AlertService()
 
         # === Action Registry ===
@@ -43,6 +44,8 @@ class DataService:
             "get_history": "_handle_get_history",
             "search_news": "_handle_search_news",
             "get_kline_data": "_handle_get_kline_data",
+            "get_indicators": "_handle_get_indicators",
+            "screen_stocks": "_handle_screen_stocks",
             "get_tasks": "_handle_get_tasks",
             "get_task": "_handle_get_task",
             "cancel_task": "_handle_cancel_task",
@@ -119,6 +122,12 @@ class DataService:
                 "error": None,
             }
 
+        # Persist task creation
+        try:
+            get_db().save_task(task_id, code, "pending")
+        except Exception:
+            pass  # Non-critical if DB save fails initially
+
         # 异步执行分析（不阻塞 DataService）
         thread = threading.Thread(target=self._run_analyze_task, args=(task_id, code))
         thread.daemon = True
@@ -128,16 +137,20 @@ class DataService:
 
     def _run_analyze_task(self, task_id: str, code: str):
         """后台执行 AI 分析"""
+        db = get_db()
+
         try:
             # Check if cancelled before starting
             with self._tasks_lock:
                 if self._tasks[task_id]["status"] == "cancelled":
-                    return  # Don't process cancelled tasks
+                    return
                 self._tasks[task_id]["status"] = "running"
 
+            # Persist running status
+            db.save_task(task_id, code, "running")
+
             # 获取分析上下文
-            from src.storage import get_db
-            context = get_db().get_analysis_context(code)
+            context = db.get_analysis_context(code)
 
             # 执行 AI 分析
             from src.analyzer import GeminiAnalyzer
@@ -147,10 +160,13 @@ class DataService:
             # Check if cancelled before saving result
             with self._tasks_lock:
                 if self._tasks[task_id]["status"] == "cancelled":
-                    return  # Don't save result for cancelled tasks
+                    return
                 self._tasks[task_id]["status"] = "completed"
                 self._tasks[task_id]["result"] = result.to_dict()
                 self._tasks[task_id]["completed_at"] = datetime.now().isoformat()
+
+            # Persist completed status
+            db.save_task(task_id, code, "completed", result_json=json.dumps(result.to_dict()))
 
             # 发送通知
             self._send_analysis_notification(code, result)
@@ -159,9 +175,10 @@ class DataService:
             logger.error(f"AI 分析失败 [{code}]: {e}")
             with self._tasks_lock:
                 if self._tasks[task_id]["status"] == "cancelled":
-                    return  # Don't update status for cancelled tasks
+                    return
                 self._tasks[task_id]["status"] = "failed"
                 self._tasks[task_id]["error"] = str(e)
+            db.save_task(task_id, code, "failed", error=str(e))
 
     def _send_analysis_notification(self, code: str, result):
         """发送分析完成通知"""
@@ -245,6 +262,7 @@ class DataService:
             return {"status": "error", "message": "缺少股票代码 code 参数"}
 
         days = req.get("days", 60)
+        indicators = req.get("indicators")
 
         try:
             # 先获取历史数据
@@ -258,13 +276,86 @@ class DataService:
 
             # 生成K线图表
             from src.charts import create_kline_chart
-            chart_path = create_kline_chart(history_data, code, days=days)
+            chart_path = create_kline_chart(history_data, code, days=days, indicators=indicators)
 
             return {"status": "ok", "image_path": chart_path, "data": history_data}
 
         except Exception as e:
             logger.error(f"获取K线数据失败 [{code}]: {e}")
             return {"status": "error", "message": f"获取K线数据失败: {str(e)}"}
+
+    def _handle_get_indicators(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """获取技术指标数据"""
+        code = req.get("code")
+        if not code:
+            return {"status": "error", "message": "缺少股票代码 code 参数"}
+
+        indicator_names = req.get("indicator_names")
+        if not indicator_names:
+            return {"status": "error", "message": "缺少 indicator_names 参数"}
+
+        if isinstance(indicator_names, str):
+            indicator_names = [indicator_names]
+
+        days = req.get("days", 60)
+
+        try:
+            # 获取历史数据
+            history_result = self._handle_get_history({"code": code, "days": days})
+            if history_result.get("status") != "ok":
+                return history_result
+
+            history_data = history_result.get("data", [])
+            if not history_data:
+                return {"status": "ok", "data": {}, "message": "无历史数据"}
+
+            # 计算指标
+            from src.charts import convert_history_to_df, add_indicators
+            df = convert_history_to_df(history_data)
+            if df is None:
+                return {"status": "ok", "data": {}, "message": "无历史数据"}
+
+            df = add_indicators(df, indicator_names)
+
+            # 构建返回数据
+            indicator_data = {}
+            valid_indicators = {"rsi", "macd", "bollinger", "kdj", "wr", "obv"}
+
+            for name in indicator_names:
+                name_lower = name.lower()
+                if name_lower not in valid_indicators:
+                    continue
+
+                if name_lower == "rsi":
+                    indicator_data["rsi"] = df["RSI"].dropna().to_dict()
+                elif name_lower == "macd":
+                    indicator_data["macd"] = {
+                        "macd": df["MACD"].dropna().to_dict(),
+                        "dif": df["DIF"].dropna().to_dict(),
+                        "dea": df["DEA"].dropna().to_dict(),
+                    }
+                elif name_lower == "bollinger":
+                    indicator_data["bollinger"] = {
+                        "upper": df["BB_UPPER"].dropna().to_dict(),
+                        "middle": df["BB_MIDDLE"].dropna().to_dict(),
+                        "lower": df["BB_LOWER"].dropna().to_dict(),
+                    }
+                elif name_lower == "kdj":
+                    indicator_data["kdj"] = {
+                        "k": df["K"].dropna().to_dict(),
+                        "d": df["D"].dropna().to_dict(),
+                        "j": df["J"].dropna().to_dict(),
+                    }
+                elif name_lower == "wr":
+                    indicator_data["wr"] = df["WR"].dropna().to_dict()
+                elif name_lower == "obv":
+                    indicator_data["obv"] = df["OBV"].dropna().to_dict()
+
+            return {"status": "ok", "data": indicator_data}
+
+        except Exception as e:
+            logger.error(f"获取技术指标失败 [{code}]: {e}")
+            return {"status": "error", "message": f"获取技术指标失败: {str(e)}"}
 
     def _handle_get_tasks(self, req: Dict[str, Any]) -> Dict[str, Any]:
         """获取所有任务列表"""
@@ -335,28 +426,15 @@ class DataService:
             return {"status": "error", "message": "缺少 buy_date 参数"}
 
         try:
-            conn = sqlite3.connect(self._db_path)
-            c = conn.cursor()
-            now = datetime.now().isoformat()
-            c.execute("""
-                INSERT INTO positions (code, name, shares, buy_price, buy_date, current_price, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (code, name, shares, buy_price, buy_date, buy_price, now, now))
-            position_id = c.lastrowid
-            conn.commit()
-            conn.close()
-
-            # Return the created position
-            position = Position(
-                id=position_id,
+            buy_date_parsed = date.fromisoformat(buy_date)
+            db = get_db()
+            position = db.save_position(
                 code=code,
                 name=name,
                 shares=shares,
                 buy_price=buy_price,
-                buy_date=date.fromisoformat(buy_date),
+                buy_date=buy_date_parsed,
                 current_price=buy_price,
-                created_at=datetime.fromisoformat(now),
-                updated_at=datetime.fromisoformat(now),
             )
             return {"status": "ok", "position": position.to_dict()}
         except Exception as e:
@@ -370,16 +448,12 @@ class DataService:
             return {"status": "error", "message": "缺少 id 参数"}
 
         try:
-            conn = sqlite3.connect(self._db_path)
-            c = conn.cursor()
-            c.execute("SELECT id FROM positions WHERE id = ?", (position_id,))
-            if c.fetchone() is None:
-                conn.close()
+            db = get_db()
+            position = db.get_position(position_id)
+            if not position:
                 return {"status": "error", "message": f"持仓 {position_id} 不存在"}
 
-            c.execute("DELETE FROM positions WHERE id = ?", (position_id,))
-            conn.commit()
-            conn.close()
+            db.delete_position(position_id)
             return {"status": "ok", "message": "持仓已删除"}
         except Exception as e:
             logger.error(f"删除持仓失败: {e}")
@@ -392,55 +466,25 @@ class DataService:
             return {"status": "error", "message": "缺少 id 参数"}
 
         try:
-            conn = sqlite3.connect(self._db_path)
-            c = conn.cursor()
-            c.execute("SELECT * FROM positions WHERE id = ?", (position_id,))
-            row = c.fetchone()
-            if row is None:
-                conn.close()
+            db = get_db()
+            existing = db.get_position(position_id)
+            if not existing:
                 return {"status": "error", "message": f"持仓 {position_id} 不存在"}
 
-            # Build update query dynamically
-            updates = []
-            params = []
+            # Build update kwargs dynamically
+            kwargs = {}
             if "current_price" in req:
-                updates.append("current_price = ?")
-                params.append(req["current_price"])
+                kwargs["current_price"] = req["current_price"]
             if "shares" in req:
-                updates.append("shares = ?")
-                params.append(req["shares"])
+                kwargs["shares"] = req["shares"]
             if "buy_price" in req:
-                updates.append("buy_price = ?")
-                params.append(req["buy_price"])
+                kwargs["buy_price"] = req["buy_price"]
 
-            if not updates:
-                conn.close()
+            if not kwargs:
                 return {"status": "error", "message": "没有提供更新字段"}
 
-            updates.append("updated_at = ?")
-            params.append(datetime.now().isoformat())
-            params.append(position_id)
-
-            c.execute(f"UPDATE positions SET {', '.join(updates)} WHERE id = ?", params)
-            conn.commit()
-
-            # Fetch updated position
-            c.execute("SELECT * FROM positions WHERE id = ?", (position_id,))
-            row = c.fetchone()
-            conn.close()
-
-            position = Position(
-                id=row[0],
-                code=row[1],
-                name=row[2],
-                shares=row[3],
-                buy_price=row[4],
-                buy_date=date.fromisoformat(row[5]),
-                current_price=row[6],
-                created_at=datetime.fromisoformat(row[7]) if row[7] else None,
-                updated_at=datetime.fromisoformat(row[8]) if row[8] else None,
-            )
-            return {"status": "ok", "position": position.to_dict()}
+            updated = db.update_position(position_id, **kwargs)
+            return {"status": "ok", "position": updated.to_dict()}
         except Exception as e:
             logger.error(f"更新持仓失败: {e}")
             return {"status": "error", "message": f"更新持仓失败: {str(e)}"}
@@ -448,27 +492,9 @@ class DataService:
     def _handle_get_positions(self, req: Dict[str, Any]) -> Dict[str, Any]:
         """获取所有持仓"""
         try:
-            conn = sqlite3.connect(self._db_path)
-            c = conn.cursor()
-            c.execute("SELECT * FROM positions ORDER BY created_at DESC")
-            rows = c.fetchall()
-            conn.close()
-
-            positions = []
-            for row in rows:
-                position = Position(
-                    id=row[0],
-                    code=row[1],
-                    name=row[2],
-                    shares=row[3],
-                    buy_price=row[4],
-                    buy_date=date.fromisoformat(row[5]),
-                    current_price=row[6],
-                    created_at=datetime.fromisoformat(row[7]) if row[7] else None,
-                    updated_at=datetime.fromisoformat(row[8]) if row[8] else None,
-                )
-                positions.append(position.to_dict())
-            return {"status": "ok", "positions": positions}
+            db = get_db()
+            positions = db.get_positions()
+            return {"status": "ok", "positions": [p.to_dict() for p in positions]}
         except Exception as e:
             logger.error(f"获取持仓失败: {e}")
             return {"status": "error", "message": f"获取持仓失败: {str(e)}"}
@@ -544,10 +570,118 @@ class DataService:
             logger.error(f"回测失败 [{code}]: {e}")
             return {"status": "error", "message": f"回测失败: {str(e)}"}
 
+    def _handle_screen_stocks(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """股票筛选器 - 根据条件筛选股票"""
+        try:
+            import akshare as ak
+            import pandas as pd
+            from data_provider.realtime_types import safe_float
+
+            # 获取筛选条件
+            market_cap_min = req.get("market_cap_min")  # 最小市值（亿元）
+            market_cap_max = req.get("market_cap_max")  # 最大市值（亿元）
+            pe_min = req.get("pe_min")  # 最小市盈率
+            pe_max = req.get("pe_max")  # 最大市盈率
+            industry = req.get("industry")  # 行业筛选
+            change_pct_min = req.get("change_pct_min")  # 最小涨跌幅%
+            change_pct_max = req.get("change_pct_max")  # 最大涨跌幅%
+
+            logger.info(f"[筛选器] 开始筛选: 市值={market_cap_min}-{market_cap_max}, "
+                       f"PE={pe_min}-{pe_max}, 行业={industry}, 涨跌幅={change_pct_min}-{change_pct_max}")
+
+            # 获取全市场实时行情（东方财富数据源）
+            # 数据包含：代码、名称、最新价、涨跌幅、成交量、成交额、市盈率、市净率、总市值、流通市值等
+            df = ak.stock_zh_a_spot_em()
+
+            if df is None or df.empty:
+                logger.warning("[筛选器] 未获取到行情数据")
+                return {"status": "ok", "data": [], "message": "无行情数据"}
+
+            # 重命名列以便后续处理
+            column_mapping = {
+                '代码': 'code',
+                '名称': 'name',
+                '最新价': 'price',
+                '涨跌幅': 'change_pct',
+                '涨跌额': 'change_amount',
+                '成交量': 'volume',
+                '成交额': 'amount',
+                '市盈率-动态': 'pe',
+                '市净率': 'pb',
+                '总市值': 'total_mv',
+                '流通市值': 'circ_mv',
+            }
+            df = df.rename(columns=column_mapping)
+
+            # 转换数值类型
+            for col in ['price', 'change_pct', 'change_amount', 'volume', 'amount', 'pe', 'pb', 'total_mv', 'circ_mv']:
+                if col in df.columns:
+                    df[col] = df[col].apply(lambda x: safe_float(x) if not isinstance(x, (int, float)) else x)
+
+            # 应用筛选条件
+            filtered = df.copy()
+
+            # 市值筛选（总市值单位是元，转换为亿元）
+            if market_cap_min is not None:
+                filtered = filtered[filtered['total_mv'].apply(
+                    lambda x: x is not None and x > 0 and x / 1e8 >= market_cap_min)]
+            if market_cap_max is not None:
+                filtered = filtered[filtered['total_mv'].apply(
+                    lambda x: x is not None and x > 0 and x / 1e8 <= market_cap_max)]
+
+            # 市盈率筛选
+            if pe_min is not None:
+                filtered = filtered[filtered['pe'].apply(lambda x: x is not None and x >= pe_min)]
+            if pe_max is not None:
+                filtered = filtered[filtered['pe'].apply(lambda x: x is not None and x <= pe_max)]
+
+            # 涨跌幅筛选
+            if change_pct_min is not None:
+                filtered = filtered[filtered['change_pct'].apply(lambda x: x is not None and x >= change_pct_min)]
+            if change_pct_max is not None:
+                filtered = filtered[filtered['change_pct'].apply(lambda x: x is not None and x <= change_pct_max)]
+
+            # 行业筛选（需要获取行业数据）
+            if industry:
+                try:
+                    # 获取行业板块成分股
+                    industry_df = ak.stock_board_industry_cons_em(symbol=industry)
+                    if industry_df is not None and not industry_df.empty:
+                        industry_codes = set(industry_df['代码'].astype(str).tolist())
+                        filtered = filtered[filtered['code'].astype(str).isin(industry_codes)]
+                except Exception as e:
+                    logger.warning(f"[筛选器] 行业筛选失败: {e}")
+
+            # 转换为结果列表
+            results = []
+            for _, row in filtered.iterrows():
+                results.append({
+                    'code': str(row.get('code', '')),
+                    'name': str(row.get('name', '')),
+                    'price': row.get('price'),
+                    'change_pct': row.get('change_pct'),
+                    'volume': row.get('volume'),
+                    'pe': row.get('pe'),
+                    'pb': row.get('pb'),
+                    'total_mv': row.get('total_mv'),
+                    'circ_mv': row.get('circ_mv'),
+                })
+
+            logger.info(f"[筛选器] 筛选完成: 符合条件的股票 {len(results)} 只")
+            return {"status": "ok", "data": results, "count": len(results)}
+
+        except Exception as e:
+            logger.error(f"[筛选器] 筛选失败: {e}")
+            return {"status": "error", "message": f"筛选失败: {str(e)}"}
+
     # === Existing Helper Methods ===
 
     def _init_db(self):
-        """初始化 SQLite 数据库"""
+        """Initialize DataService's legacy SQLite database (for backward compat).
+
+        Creates the legacy markets/positions/schema_version tables.
+        Note: storage.py manages the main application DB (stock_daily, analysis_history).
+        """
         conn = sqlite3.connect(self._db_path)
         c = conn.cursor()
         c.execute("""
@@ -573,6 +707,20 @@ class DataService:
                 updated_at TEXT
             )
         """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS schema_version (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                version INTEGER NOT NULL,
+                applied_at TEXT,
+                description TEXT
+            )
+        """)
+        # Record schema version if not present
+        c.execute("SELECT COUNT(*) FROM schema_version")
+        if c.fetchone()[0] == 0:
+            c.execute("INSERT INTO schema_version (version, applied_at, description) VALUES (?, ?, ?)",
+                       (2, datetime.now().isoformat(), "Initial schema v2"))
+            logger.info("Schema version set to v2")
         conn.commit()
         conn.close()
 
@@ -583,12 +731,9 @@ class DataService:
     def _get_markets(self) -> List[Dict]:
         """从数据库获取行情数据"""
         try:
-            conn = sqlite3.connect(self._db_path)
-            c = conn.cursor()
-            c.execute("SELECT code, name, price, change_pct, volume FROM markets")
-            rows = c.fetchall()
-            conn.close()
-            return [{"code": r[0], "name": r[1], "price": r[2], "change_pct": r[3], "volume": r[4]} for r in rows]
+            db = get_db()
+            markets = db.get_markets()
+            return [m.to_dict() for m in markets]
         except Exception as e:
             logger.error(f"获取行情数据失败: {e}")
             return []
@@ -642,15 +787,14 @@ class DataService:
     def _save_market(self, market: Dict):
         """保存行情到数据库"""
         try:
-            conn = sqlite3.connect(self._db_path)
-            c = conn.cursor()
-            c.execute("""
-                INSERT OR REPLACE INTO markets (code, name, price, change_pct, volume, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (market["code"], market["name"], market["price"],
-                  market["change_pct"], market["volume"], datetime.now().isoformat()))
-            conn.commit()
-            conn.close()
+            db = get_db()
+            db.save_market(
+                code=market["code"],
+                name=market["name"],
+                price=market["price"],
+                change_pct=market["change_pct"],
+                volume=market["volume"],
+            )
         except Exception as e:
             logger.error(f"保存行情数据失败 [{market.get('code', 'unknown')}]: {e}")
 

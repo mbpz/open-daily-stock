@@ -49,8 +49,21 @@ logger = logging.getLogger(__name__)
 # SQLAlchemy ORM 基类
 Base = declarative_base()
 
+# Current database schema version
+CURRENT_SCHEMA_VERSION = 2
+
 
 # === 数据模型定义 ===
+
+class SchemaVersion(Base):
+    """数据库 schema 版本记录（用于迁移）"""
+    __tablename__ = 'schema_version'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    version = Column(Integer, nullable=False, default=1)
+    applied_at = Column(DateTime, default=datetime.now)
+    description = Column(String(200))
+
 
 class StockDaily(Base):
     """
@@ -173,6 +186,9 @@ class DatabaseManager:
         # 创建所有表
         Base.metadata.create_all(self._engine)
 
+        # Migration: ensure task_id column exists in analysis_history
+        self._migrate_analysis_history_task_id()
+
         self._initialized = True
         logger.info(f"数据库初始化完成: {db_url}")
 
@@ -225,7 +241,22 @@ class DatabaseManager:
         except Exception:
             session.close()
             raise
-    
+
+    def _migrate_analysis_history_task_id(self):
+        """Add task_id column to analysis_history if it doesn't exist (migration from v1 schema)."""
+        from sqlalchemy import text
+        try:
+            with self.get_session() as session:
+                # Check if task_id column exists
+                result = session.execute(text("PRAGMA table_info(analysis_history)"))
+                columns = [row[1] for row in result.fetchall()]
+                if 'task_id' not in columns:
+                    session.execute(text("ALTER TABLE analysis_history ADD COLUMN task_id VARCHAR(50)"))
+                    session.commit()
+                    logger.info("Migration: added task_id column to analysis_history")
+        except Exception as e:
+            logger.warning(f"Migration check failed: {e}")
+
     def has_today_data(self, code: str, target_date: Optional[date] = None) -> bool:
         """
         检查是否已有指定日期的数据
@@ -564,6 +595,188 @@ class DatabaseManager:
             ).scalars().all()
             return list(results)
 
+    def ensure_schema_version(self) -> int:
+        """Ensure schema_version table is populated. Returns current version."""
+        with self.get_session() as session:
+            try:
+                existing = session.execute(
+                    select(SchemaVersion).order_by(desc(SchemaVersion.version))
+                ).scalars().first()
+
+                if existing is None:
+                    # First run: record current version
+                    sv = SchemaVersion(version=CURRENT_SCHEMA_VERSION,
+                                       description="Initial schema with stock_daily + analysis_history")
+                    session.add(sv)
+                    session.commit()
+                    logger.info(f"Schema version set to {CURRENT_SCHEMA_VERSION}")
+                    return CURRENT_SCHEMA_VERSION
+                return existing.version
+            except Exception:
+                session.rollback()
+                raise
+
+    def save_task(self, task_id: str, code: str, status: str,
+                  result_json: str = None, error: str = None) -> None:
+        """Save or update a task in AnalysisHistory"""
+        with self.get_session() as session:
+            try:
+                existing = session.execute(
+                    select(AnalysisHistory).where(AnalysisHistory.task_id == task_id)
+                ).scalars().first()
+
+                if existing:
+                    existing.status = status
+                    if result_json is not None:
+                        existing.result_json = result_json
+                    if error is not None:
+                        existing.error = error
+                else:
+                    entry = AnalysisHistory(
+                        task_id=task_id,
+                        code=code,
+                        status=status,
+                        result_json=result_json,
+                        error=error,
+                    )
+                    session.add(entry)
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+
+    def load_tasks(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Load recent tasks from database"""
+        with self.get_session() as session:
+            try:
+                results = session.execute(
+                    select(AnalysisHistory)
+                    .order_by(desc(AnalysisHistory.timestamp))
+                    .limit(limit)
+                ).scalars().all()
+                return [r.to_dict() for r in results]
+            except Exception:
+                session.rollback()
+                return []
+
+    def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single task by ID"""
+        with self.get_session() as session:
+            try:
+                result = session.execute(
+                    select(AnalysisHistory).where(AnalysisHistory.task_id == task_id)
+                ).scalars().first()
+                return result.to_dict() if result else None
+            except Exception:
+                session.rollback()
+                return None
+
+    # === Position CRUD ===
+
+    def save_position(self, code: str, name: str, shares: float, buy_price: float,
+                      buy_date: date, current_price: Optional[float] = None) -> Position:
+        """Create a new position"""
+        with self.get_session() as session:
+            position = Position(
+                code=code,
+                name=name,
+                shares=shares,
+                buy_price=buy_price,
+                buy_date=buy_date,
+                current_price=current_price or buy_price,
+            )
+            session.add(position)
+            session.commit()
+            session.refresh(position)
+            return position
+
+    def get_positions(self) -> List[Position]:
+        """Get all positions"""
+        with self.get_session() as session:
+            results = session.execute(
+                select(Position).order_by(desc(Position.created_at))
+            ).scalars().all()
+            return list(results)
+
+    def get_position(self, position_id: int) -> Optional[Position]:
+        """Get a position by ID"""
+        with self.get_session() as session:
+            return session.execute(
+                select(Position).where(Position.id == position_id)
+            ).scalars().first()
+
+    def update_position(self, position_id: int, **kwargs) -> Optional[Position]:
+        """Update a position (current_price, shares, buy_price)"""
+        with self.get_session() as session:
+            position = session.execute(
+                select(Position).where(Position.id == position_id)
+            ).scalars().first()
+            if not position:
+                return None
+            for key, value in kwargs.items():
+                if hasattr(position, key) and value is not None:
+                    setattr(position, key, value)
+            position.updated_at = datetime.now()
+            session.commit()
+            session.refresh(position)
+            return position
+
+    def delete_position(self, position_id: int) -> bool:
+        """Delete a position by ID"""
+        with self.get_session() as session:
+            position = session.execute(
+                select(Position).where(Position.id == position_id)
+            ).scalars().first()
+            if not position:
+                return False
+            session.delete(position)
+            session.commit()
+            return True
+
+    # === Market CRUD ===
+
+    def save_market(self, code: str, name: str, price: float,
+                    change_pct: float, volume: int) -> Market:
+        """Create or update a market entry"""
+        with self.get_session() as session:
+            existing = session.execute(
+                select(Market).where(Market.code == code)
+            ).scalars().first()
+            if existing:
+                existing.name = name
+                existing.price = price
+                existing.change_pct = change_pct
+                existing.volume = volume
+                existing.updated_at = datetime.now()
+                session.commit()
+                return existing
+            else:
+                market = Market(
+                    code=code,
+                    name=name,
+                    price=price,
+                    change_pct=change_pct,
+                    volume=volume,
+                )
+                session.add(market)
+                session.commit()
+                return market
+
+    def get_markets(self) -> List[Market]:
+        """Get all markets"""
+        with self.get_session() as session:
+            results = session.execute(
+                select(Market)
+            ).scalars().all()
+            return list(results)
+
+    def get_market(self, code: str) -> Optional[Market]:
+        """Get a market by code"""
+        with self.get_session() as session:
+            return session.execute(
+                select(Market).where(Market.code == code)
+            ).scalars().first()
+
 
 class AnalysisHistory(Base):
     """
@@ -576,13 +789,16 @@ class AnalysisHistory(Base):
     # 主键
     id = Column(Integer, primary_key=True, autoincrement=True)
 
+    # 任务 ID（UUID，用于 DataService 关联）
+    task_id = Column(String(50), index=True)
+
     # 股票代码
     code = Column(String(10), nullable=False, index=True)
 
     # 时间戳
     timestamp = Column(DateTime, default=datetime.now, index=True)
 
-    # 状态：pending/running/done/failed
+    # 状态：pending/running/completed/failed/cancelled
     status = Column(String(20), default="pending")
 
     # 分析结果 JSON
@@ -592,18 +808,140 @@ class AnalysisHistory(Base):
     error = Column(Text)
 
     def __repr__(self):
-        return f"<AnalysisHistory(code={self.code}, status={self.status}, timestamp={self.timestamp})>"
+        return f"<AnalysisHistory(task_id={self.task_id}, code={self.code}, status={self.status})>"
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
             'id': self.id,
+            'task_id': self.task_id,
             'code': self.code,
             'timestamp': self.timestamp.isoformat() if self.timestamp else None,
             'status': self.status,
             'result_json': self.result_json,
             'error': self.error,
         }
+
+
+class Position(Base):
+    """
+    持仓记录模型
+
+    存储用户的股票持仓信息
+    """
+    __tablename__ = 'positions'
+
+    # 主键
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # 股票代码
+    code = Column(String(10), nullable=False)
+
+    # 股票名称
+    name = Column(String(100))
+
+    # 持股数量
+    shares = Column(Float, nullable=False)
+
+    # 买入价格
+    buy_price = Column(Float, nullable=False)
+
+    # 买入日期
+    buy_date = Column(Date, nullable=False)
+
+    # 当前价格
+    current_price = Column(Float)
+
+    # 创建时间
+    created_at = Column(DateTime, default=datetime.now)
+
+    # 更新时间
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def __repr__(self):
+        return f"<Position(code={self.code}, shares={self.shares}, buy_price={self.buy_price})>"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        return {
+            'id': self.id,
+            'code': self.code,
+            'name': self.name,
+            'shares': self.shares,
+            'buy_price': self.buy_price,
+            'buy_date': self.buy_date.isoformat() if self.buy_date else None,
+            'current_price': self.current_price,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class Market(Base):
+    """
+    市场行情模型
+
+    存储股票市场的实时行情数据
+    """
+    __tablename__ = 'markets'
+
+    # 股票代码（主键）
+    code = Column(String(10), primary_key=True)
+
+    # 股票名称
+    name = Column(String(100))
+
+    # 当前价格
+    price = Column(Float)
+
+    # 涨跌幅（%）
+    change_pct = Column(Float)
+
+    # 成交量
+    volume = Column(Integer)
+
+    # 更新时间
+    updated_at = Column(DateTime, default=datetime.now)
+
+    def __repr__(self):
+        return f"<Market(code={self.code}, name={self.name}, price={self.price})>"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        return {
+            'code': self.code,
+            'name': self.name,
+            'price': self.price,
+            'change_pct': self.change_pct,
+            'volume': self.volume,
+            'volume_display': self._format_volume_display(),
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    def _format_volume_display(self) -> str:
+        """Format volume for display based on market type"""
+        if self.volume is None:
+            return '---'
+        try:
+            v = float(self.volume)
+            code = self.code or ''
+            # A股/港股 use 万 (ten thousands)
+            if code.startswith('hk') or (len(code) == 6 and code.isdigit() and not code.startswith('9')):
+                if v >= 100000000:
+                    return f"{v/100000000:.1f}亿"
+                elif v >= 10000:
+                    return f"{v/10000:.0f}万"
+                return f"{v:.0f}"
+            else:
+                # US stocks use M/B notation
+                if v >= 1000000000:
+                    return f"{v/1000000000:.1f}B"
+                elif v >= 1000000:
+                    return f"{v/1000000:.1f}M"
+                elif v >= 1000:
+                    return f"{v/1000:.1f}K"
+                return f"{v:.0f}"
+        except (ValueError, TypeError):
+            return '---'
 
 
 # 便捷函数
