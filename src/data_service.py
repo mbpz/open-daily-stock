@@ -4,6 +4,7 @@ import sys
 import sqlite3
 import logging
 import threading
+import uuid
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Callable
 
@@ -96,7 +97,7 @@ class DataService:
             return {"status": "error", "message": "缺少股票代码 code 参数"}
 
         # 生成 task_id
-        task_id = f"task_{len(self._tasks) + 1}_{code}_{int(datetime.now().timestamp())}"
+        task_id = f"task_{uuid.uuid4().hex[:8]}_{code}_{int(datetime.now().timestamp())}"
 
         # 创建任务记录
         with self._tasks_lock:
@@ -119,7 +120,10 @@ class DataService:
     def _run_analyze_task(self, task_id: str, code: str):
         """后台执行 AI 分析"""
         try:
+            # Check if cancelled before starting
             with self._tasks_lock:
+                if self._tasks[task_id]["status"] == "cancelled":
+                    return  # Don't process cancelled tasks
                 self._tasks[task_id]["status"] = "running"
 
             # 获取分析上下文
@@ -131,8 +135,10 @@ class DataService:
             analyzer = GeminiAnalyzer()
             result = analyzer.analyze(context)
 
-            # 保存结果
+            # Check if cancelled before saving result
             with self._tasks_lock:
+                if self._tasks[task_id]["status"] == "cancelled":
+                    return  # Don't save result for cancelled tasks
                 self._tasks[task_id]["status"] = "completed"
                 self._tasks[task_id]["result"] = result.to_dict()
                 self._tasks[task_id]["completed_at"] = datetime.now().isoformat()
@@ -143,6 +149,8 @@ class DataService:
         except Exception as e:
             logger.error(f"AI 分析失败 [{code}]: {e}")
             with self._tasks_lock:
+                if self._tasks[task_id]["status"] == "cancelled":
+                    return  # Don't update status for cancelled tasks
                 self._tasks[task_id]["status"] = "failed"
                 self._tasks[task_id]["error"] = str(e)
 
