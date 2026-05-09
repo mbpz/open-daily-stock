@@ -189,6 +189,9 @@ class DatabaseManager:
         # Migration: ensure task_id column exists in analysis_history
         self._migrate_analysis_history_task_id()
 
+        # Ensure schema version is recorded
+        self.ensure_schema_version()
+
         self._initialized = True
         logger.info(f"数据库初始化完成: {db_url}")
 
