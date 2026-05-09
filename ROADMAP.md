@@ -86,10 +86,11 @@ stdio JSON    stdio JSON
 
 ### 中优先级
 
-- [ ] **P1-1: 数据层增强**
-  - 添加 `schema_version` 字段支持数据库迁移
-  - 行情历史表（用于 K 线回放）
-  - 任务状态持久化
+- [x] **P1-1: 数据层增强** ✅
+  - `CURRENT_SCHEMA_VERSION = 2` 常量 + `SchemaVersion` ORM model
+  - `save_task` / `load_tasks` / `get_task` 任务持久化方法到 DatabaseManager
+  - `migrate_analysis_history`：自动添加 task_id 列
+  - 10 个测试
 
 - [x] **P1-2: TUI/GUI 代码复用** ✅
   - `src/shared/` 包：style.py / market_status.py / indicators.py
@@ -280,4 +281,4 @@ open-daily-stock/
 
 ---
 
-*最后更新: 2026-05-10 — P0-1~3 完成, P1-4~7 完成, P1-1~3/P3-1~11 待实现*
+*最后更新: 2026-05-10 — P0-1~3 完成, P1-1~7 全部完成, P3-1~11 待实现*
