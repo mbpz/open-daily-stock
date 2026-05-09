@@ -42,6 +42,7 @@ class DataService:
             "analyze": "_handle_analyze",
             "get_history": "_handle_get_history",
             "search_news": "_handle_search_news",
+            "get_kline_data": "_handle_get_kline_data",
             "get_tasks": "_handle_get_tasks",
             "get_task": "_handle_get_task",
             "cancel_task": "_handle_cancel_task",
@@ -233,6 +234,34 @@ class DataService:
         except Exception as e:
             logger.error(f"搜索新闻失败 [{code}]: {e}")
             return {"status": "error", "message": f"搜索新闻失败: {str(e)}"}
+
+    def _handle_get_kline_data(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """获取K线图表数据"""
+        code = req.get("code")
+        if not code:
+            return {"status": "error", "message": "缺少股票代码 code 参数"}
+
+        days = req.get("days", 60)
+
+        try:
+            # 先获取历史数据
+            history_result = self._handle_get_history({"code": code, "days": days})
+            if history_result.get("status") != "ok":
+                return history_result
+
+            history_data = history_result.get("data", [])
+            if not history_data:
+                return {"status": "ok", "data": [], "message": "无历史数据"}
+
+            # 生成K线图表
+            from src.charts import create_kline_chart
+            chart_path = create_kline_chart(history_data, code, days=days)
+
+            return {"status": "ok", "image_path": chart_path, "data": history_data}
+
+        except Exception as e:
+            logger.error(f"获取K线数据失败 [{code}]: {e}")
+            return {"status": "error", "message": f"获取K线数据失败: {str(e)}"}
 
     def _handle_get_tasks(self, req: Dict[str, Any]) -> Dict[str, Any]:
         """获取所有任务列表"""
