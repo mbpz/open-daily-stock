@@ -112,6 +112,22 @@ class TestAnalyzeAction:
         assert service._tasks[task_id]["status"] in ["pending", "running"]
 
 
+class TestGetHistoryAction:
+    def test_get_history_returns_data(self):
+        from src.data_service import DataService
+        service = DataService()
+        result = service._handle_request({"action": "get_history", "code": "600519", "days": 30})
+        assert result["status"] == "ok"
+        assert "data" in result
+        assert isinstance(result["data"], list)
+
+    def test_get_history_missing_code(self):
+        from src.data_service import DataService
+        service = DataService()
+        result = service._handle_request({"action": "get_history"})
+        assert result["status"] == "error"
+
+
 class TestTaskManagementActions:
     def test_get_tasks_returns_list(self):
         from src.data_service import DataService

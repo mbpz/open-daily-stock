@@ -157,7 +157,39 @@ class DataService:
             logger.warning(f"发送分析通知失败: {e}")
 
     def _handle_get_history(self, req: Dict[str, Any]) -> Dict[str, Any]:
-        return {"status": "error", "message": "not implemented yet"}
+        """获取股票历史数据"""
+        code = req.get("code")
+        if not code:
+            return {"status": "error", "message": "缺少股票代码 code 参数"}
+
+        days = req.get("days", 30)  # 默认 30 天
+
+        try:
+            from data_provider.efinance_fetcher import EfinanceFetcher
+            fetcher = EfinanceFetcher()
+            df = fetcher.get_daily_data(code, days=days)
+
+            if df is None or len(df) == 0:
+                return {"status": "ok", "data": [], "message": "无历史数据"}
+
+            # 转换为 dict 列表
+            data = []
+            for _, row in df.iterrows():
+                data.append({
+                    "date": str(row.get("date", "")),
+                    "open": float(row.get("open", 0)),
+                    "high": float(row.get("high", 0)),
+                    "low": float(row.get("low", 0)),
+                    "close": float(row.get("close", 0)),
+                    "volume": float(row.get("volume", 0)),
+                    "pct_chg": float(row.get("pct_chg", 0)),
+                })
+
+            return {"status": "ok", "data": data}
+
+        except Exception as e:
+            logger.error(f"获取历史数据失败 [{code}]: {e}")
+            return {"status": "error", "message": f"获取历史数据失败: {str(e)}"}
 
     def _handle_search_news(self, req: Dict[str, Any]) -> Dict[str, Any]:
         return {"status": "error", "message": "not implemented yet"}
