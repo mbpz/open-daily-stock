@@ -54,7 +54,13 @@ class DataService:
         # === Thread Pool for concurrent request handling ===
         self._executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_REQUESTS)
 
-        # === Action Registry ===
+        # === AI API circuit breaker state (instance-level, not class-level) ===
+        self._ai_provider_state = {
+            "429_count": 0,
+            "last_429_time": 0,
+            "disabled_until": 0,  # Unix timestamp when re-enable
+            "current_provider": "gemini",
+        }
         # 映射 action name -> handler method name
         self._actions: Dict[str, str] = {
             "hello": "_handle_hello",
@@ -999,15 +1005,8 @@ class DataService:
 
     # ============================================================
     # AI API 429 Retry with Circuit Breaker
+    # (state is initialized in __init__ as self._ai_provider_state)
     # ============================================================
-
-    # AI API circuit breaker state
-    _ai_provider_state = {
-        "429_count": 0,
-        "last_429_time": 0,
-        "disabled_until": 0,  # Unix timestamp when re-enable
-        "current_provider": "gemini",
-    }
 
     def _analyze_with_retry(self, code: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """
