@@ -94,10 +94,10 @@ class Position:
 
         return cls(
             id=data.get("id"),
-            code=data["code"],
-            name=data["name"],
-            shares=data["shares"],
-            buy_price=data["buy_price"],
+            code=data.get("code", ""),
+            name=data.get("name", ""),
+            shares=data.get("shares", 0),
+            buy_price=data.get("buy_price", 0.0),
             buy_date=buy_date,
             current_price=data.get("current_price"),
             created_at=created_at,

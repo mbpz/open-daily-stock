@@ -9,7 +9,11 @@ A 股/港股/美股自选股智能分析系统，**本地 PC 端 TUI + GUI 双�
 - **双模式并行** — TUI 和 GUI 功能完全对等，用户可选
 - **多数据源** — AkShare（免费 A 股）、YFinance（港美股）
 - **AI 分析** — Google Gemini / OpenAI 兼容 API（DeepSeek/通义等）
-- **多渠道推送** — 企业微信、飞书、Telegram、邮件
+- **多渠道推送** — 企业微信、飞书、Telegram、邮件、Discord
+- **持仓管理** — 成本盈亏自动计算，收益率实时展示
+- **K线回放** — 历史行情蜡烛图，支持 MA5/MA10/MA20
+- **机构追踪** — 大股东增减持、机构调研、龙虎榜
+- **简易回测** — 日线级 MA 交叉策略回测，收益率/最大回撤/夏普比率
 - **一键安装** — PyInstaller 打包，用户下载即用
 - **自动更新** — GitHub Releases 检查，GUI 一键升级
 
@@ -98,19 +102,26 @@ python main.py --dry-run          # 仅获取数据
 open-daily-stock/
 ├── main.py              # 唯一主入口（TUI/GUI 自动选择）
 ├── src/
-│   ├── data_service.py  # 后端守护进程（数据拉取、缓存、推送）
+│   ├── data_service.py  # 后端守护进程
 │   ├── analyzer.py      # AI 分析器
 │   ├── config.py        # 配置管理
 │   ├── pipeline.py      # 分析管线
+│   ├── portfolio.py     # 持仓成本管理
+│   ├── charts.py        # K线图表生成
+│   ├── institutional.py # 机构动向追踪
+│   ├── backtester.py    # 回测引擎
 │   ├── notification.py  # 通知推送
-│   └── update_service.py # 自动更新
+│   ├── update_service.py # 自动更新
+│   ├── notify/          # 通知渠道模块
+│   │   ├── channels/    # wechat/feishu/telegram/email/discord
+│   │   ├── formatters.py
+│   │   └── dispatcher.py
+│   └── search_pkg/      # 搜索模块
+│       ├── base.py / bocha.py / tavily.py / serpapi.py
+│       └── manager.py
 ├── tui/                 # TUI 界面（Textual）
-│   ├── app.py          # Textual App
-│   └── widgets/        # 各模块视图
 ├── gui/                 # GUI 界面（Flet）
-│   ├── main.py         # Flet 入口
-│   ├── app.py         # StockApp 主界面
-│   └── pages/         # 各页面
+│   └── pages/          # Markets/Analyze/Tasks/Config/Logs/Kline
 ├── data_provider/       # 数据源适配器
 └── .github/workflows/   # 构建流程
 ```

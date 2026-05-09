@@ -79,15 +79,14 @@ def ma_crossover_strategy(data: List[Dict]) -> List[Dict]:
     return trades
 
 
-def _calculate_returns(data: List[Dict], trades: List[Dict], initial_capital: float) -> Tuple[List[float], List[float]]:
+def _calculate_returns(data: List[Dict], trades: List[Dict], initial_capital: float) -> Tuple[List[float], List[float], int, int]:
     """Calculate portfolio value over time and returns
 
     Returns:
-        Tuple of (portfolio_values, daily_returns)
+        Tuple of (portfolio_values, daily_returns, completed_sells, winning_trades)
     """
     if not trades:
-        # No trades, portfolio stays at initial capital
-        return [initial_capital], []
+        return [initial_capital], [], 0, 0
 
     # Build trade ledger
     cash = initial_capital
@@ -96,6 +95,8 @@ def _calculate_returns(data: List[Dict], trades: List[Dict], initial_capital: fl
 
     portfolio_values = []
     trade_index = 0
+    completed_sells = 0
+    winning_trades = 0
 
     for i, day in enumerate(data):
         current_date = day["date"]
@@ -104,19 +105,19 @@ def _calculate_returns(data: List[Dict], trades: List[Dict], initial_capital: fl
         while trade_index < len(trades) and trades[trade_index]["date"] == current_date:
             trade = trades[trade_index]
             if trade["action"] == "buy":
-                # Buy shares
                 cost = trade["price"] * trade["shares"]
                 if cash >= cost:
                     cash -= cost
                     shares += trade["shares"]
                     position_entry_price = trade["price"]
-                    trade_index += 1
-                else:
-                    # Not enough cash to buy - skip this trade and move to next day
-                    trade_index += 1
+                trade_index += 1
             elif trade["action"] == "sell":
-                # Sell shares
+                completed_sells += 1
                 proceeds = trade["price"] * trade["shares"]
+                if shares > 0 and position_entry_price > 0:
+                    pnl = proceeds - (position_entry_price * shares)
+                    if pnl > 0:
+                        winning_trades += 1
                 cash += proceeds
                 shares = 0
                 position_entry_price = 0
@@ -133,7 +134,7 @@ def _calculate_returns(data: List[Dict], trades: List[Dict], initial_capital: fl
             ret = (portfolio_values[i] - portfolio_values[i - 1]) / portfolio_values[i - 1] * 100
             daily_returns.append(ret)
 
-    return portfolio_values, daily_returns
+    return portfolio_values, daily_returns, completed_sells, winning_trades
 
 
 def _calculate_max_drawdown(portfolio_values: List[float]) -> float:
@@ -202,8 +203,9 @@ def backtest(history_data: List[Dict], initial_capital: float, strategy_fn: Call
     # Run strategy to get trades
     trades = strategy_fn(history_data)
 
-    # Calculate portfolio values
-    portfolio_values, daily_returns = _calculate_returns(history_data, trades, initial_capital)
+    # Calculate portfolio values (also gets win/loss counts)
+    portfolio_values, daily_returns, completed_sells, winning_trades = _calculate_returns(
+        history_data, trades, initial_capital)
 
     # Calculate metrics
     final_value = portfolio_values[-1]
@@ -213,40 +215,12 @@ def backtest(history_data: List[Dict], initial_capital: float, strategy_fn: Call
 
     sharpe_ratio = _calculate_sharpe_ratio(daily_returns)
 
-    # Count completed sell trades and winning trades
-    num_trades = len(trades)
-    completed_sells = 0
-    winning_trades = 0
-
-    # Track positions to calculate P&L
-    cash = initial_capital
-    shares = 0
-    position_entry_price = 0
-
-    for trade in trades:
-        if trade["action"] == "buy":
-            cost = trade["price"] * trade["shares"]
-            if cash >= cost:
-                cash -= cost
-                shares += trade["shares"]
-                position_entry_price = trade["price"]
-        elif trade["action"] == "sell":
-            completed_sells += 1
-            if shares > 0:
-                proceeds = trade["price"] * trade["shares"]
-                pnl = proceeds - (position_entry_price * shares)
-                if pnl > 0:
-                    winning_trades += 1
-                cash += proceeds
-                shares = 0
-                position_entry_price = 0
-
     win_rate = (winning_trades / completed_sells * 100) if completed_sells > 0 else 0.0
 
     return BacktestResult(
         total_return=round(total_return, 2),
         max_drawdown=round(max_drawdown, 2),
         sharpe_ratio=round(sharpe_ratio, 2),
-        num_trades=num_trades,
+        num_trades=len(trades),
         win_rate=round(win_rate, 2)
     )

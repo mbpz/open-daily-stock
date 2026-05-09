@@ -18,7 +18,44 @@ import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 
+from src.config import get_config
+from src.analyzer import STOCK_NAME_MAP
+
 logger = logging.getLogger(__name__)
+
+
+def _get_search_manager():
+    """Get a SearchManager instance configured from global config."""
+    config = get_config()
+    from src.search_pkg import SearchManager
+    return SearchManager(
+        bocha_keys=config.bocha_api_keys,
+        tavily_keys=config.tavily_api_keys,
+        serpapi_keys=config.serpapi_keys,
+    )
+
+
+def _search_institutional_queries(queries: List[str], result_type: str, count: int = 5) -> List[Dict[str, Any]]:
+    """Shared helper: search multiple queries and return deduplicated results."""
+    search_manager = _get_search_manager()
+    all_results = []
+    seen_urls = set()
+
+    for query in queries[:2]:
+        results = search_manager.search_all(query, count=count)
+        for r in results:
+            if r.url not in seen_urls:
+                seen_urls.add(r.url)
+                all_results.append({
+                    "type": result_type,
+                    "title": r.title,
+                    "url": r.url,
+                    "snippet": r.snippet[:200] if r.snippet else "",
+                    "source": r.source,
+                    "published_date": r.published_date,
+                })
+
+    return all_results
 
 
 def get_major_shareholder_changes(code: str, days: int = 30) -> List[Dict[str, Any]]:
@@ -33,46 +70,17 @@ def get_major_shareholder_changes(code: str, days: int = 30) -> List[Dict[str, A
         大股东增减持信息列表
     """
     try:
-        from src.search_service import SearchService
-        from src.config import get_config
-
-        config = get_config()
-        search_service = SearchService(
-            bocha_keys=config.bocha_api_keys,
-            tavily_keys=config.tavily_api_keys,
-            serpapi_keys=config.serpapi_keys
-        )
-
-        # 获取股票名称
-        from src.analyzer import STOCK_NAME_MAP
         name = STOCK_NAME_MAP.get(code, code)
 
-        # 构建搜索查询：大股东增减持
         queries = [
             f"{name} {code} 大股东 增持",
             f"{name} {code} 大股东 减持",
             f"{name} {code} 股东 增减持 公告",
         ]
 
-        all_results = []
-        seen_urls = set()
-
-        for query in queries[:2]:  # 限制查询次数
-            results = search_service.search_all(query, count=5)
-            for r in results:
-                if r.url not in seen_urls:
-                    seen_urls.add(r.url)
-                    all_results.append({
-                        "type": "major_shareholder_change",
-                        "title": r.title,
-                        "url": r.url,
-                        "snippet": r.snippet[:200] if r.snippet else "",
-                        "source": r.source,
-                        "published_date": r.published_date,
-                    })
-
-        logger.info(f"[机构追踪] 获取大股东增减持信息 {code}: {len(all_results)} 条")
-        return all_results
+        results = _search_institutional_queries(queries, "major_shareholder_change", count=5)
+        logger.info(f"[机构追踪] 获取大股东增减持信息 {code}: {len(results)} 条")
+        return results
 
     except Exception as e:
         logger.error(f"[机构追踪] 获取大股东增减持失败 [{code}]: {e}")
@@ -91,46 +99,17 @@ def get_institutional_surveys(code: str, days: int = 30) -> List[Dict[str, Any]]
         机构调研信息列表
     """
     try:
-        from src.search_service import SearchService
-        from src.config import get_config
-
-        config = get_config()
-        search_service = SearchService(
-            bocha_keys=config.bocha_api_keys,
-            tavily_keys=config.tavily_api_keys,
-            serpapi_keys=config.serpapi_keys
-        )
-
-        # 获取股票名称
-        from src.analyzer import STOCK_NAME_MAP
         name = STOCK_NAME_MAP.get(code, code)
 
-        # 构建搜索查询：机构调研
         queries = [
             f"{name} {code} 机构调研",
             f"{name} {code} 机构 调研 活动",
             f"{name} {code} 机构投资者 调研",
         ]
 
-        all_results = []
-        seen_urls = set()
-
-        for query in queries[:2]:  # 限制查询次数
-            results = search_service.search_all(query, count=5)
-            for r in results:
-                if r.url not in seen_urls:
-                    seen_urls.add(r.url)
-                    all_results.append({
-                        "type": "institutional_survey",
-                        "title": r.title,
-                        "url": r.url,
-                        "snippet": r.snippet[:200] if r.snippet else "",
-                        "source": r.source,
-                        "published_date": r.published_date,
-                    })
-
-        logger.info(f"[机构追踪] 获取机构调研信息 {code}: {len(all_results)} 条")
-        return all_results
+        results = _search_institutional_queries(queries, "institutional_survey", count=5)
+        logger.info(f"[机构追踪] 获取机构调研信息 {code}: {len(results)} 条")
+        return results
 
     except Exception as e:
         logger.error(f"[机构追踪] 获取机构调研信息失败 [{code}]: {e}")
@@ -201,42 +180,15 @@ def _get_dragon_board_fallback(days: int = 5) -> List[Dict[str, Any]]:
         龙虎榜数据列表
     """
     try:
-        from src.search_service import SearchService
-        from src.config import get_config
-
-        config = get_config()
-        search_service = SearchService(
-            bocha_keys=config.bocha_api_keys,
-            tavily_keys=config.tavily_api_keys,
-            serpapi_keys=config.serpapi_keys
-        )
-
-        # 搜索龙虎榜新闻
         queries = [
             "龙虎榜 今日 营业部 买卖",
             "龙虎榜数据 机构 席位",
             "龙虎榜 异动 股票",
         ]
 
-        all_results = []
-        seen_urls = set()
-
-        for query in queries[:2]:
-            results = search_service.search_all(query, count=8)
-            for r in results:
-                if r.url not in seen_urls:
-                    seen_urls.add(r.url)
-                    all_results.append({
-                        "type": "dragon_board_news",
-                        "title": r.title,
-                        "url": r.url,
-                        "snippet": r.snippet[:200] if r.snippet else "",
-                        "source": r.source,
-                        "published_date": r.published_date,
-                    })
-
-        logger.info(f"[龙虎榜] 搜索备选获取: {len(all_results)} 条")
-        return all_results
+        results = _search_institutional_queries(queries, "dragon_board_news", count=8)
+        logger.info(f"[龙虎榜] 搜索备选获取: {len(results)} 条")
+        return results
 
     except Exception as e:
         logger.error(f"[龙虎榜] 搜索备选失败: {e}")
@@ -254,7 +206,6 @@ def format_institutional_report(data: Dict[str, Any], code: str) -> str:
     Returns:
         格式化的报告文本
     """
-    from src.analyzer import STOCK_NAME_MAP
     name = STOCK_NAME_MAP.get(code, code)
 
     lines = [

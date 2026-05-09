@@ -13,6 +13,24 @@ import matplotlib.pyplot as plt
 
 logger = logging.getLogger(__name__)
 
+# Pre-computed mplfinance style objects (never change, so compute once)
+_MPF_MARKET_COLORS = mpf.make_marketcolors(
+    up="green", down="red", edge="inherit", wick="inherit", volume="in",
+)
+_MPF_STYLE = mpf.make_mpf_style(
+    marketcolors=_MPF_MARKET_COLORS,
+    gridstyle="-",
+    gridcolor="#333333",
+    facecolor="white",
+    figcolor="white",
+    y_on_right=True,
+)
+_MA_COLORS = {5: "purple", 10: "orange", 20: "blue"}
+_DEFAULT_MA_PERIODS = [5, 10, 20]
+
+# Default output directory (stable, not cwd-dependent)
+CHART_CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "charts_cache")
+
 
 def convert_history_to_df(history_data: List[Dict[str, Any]]) -> Optional[pd.DataFrame]:
     """
@@ -65,7 +83,7 @@ def add_ma_indicators(df: pd.DataFrame, ma_periods: List[int] = None) -> pd.Data
         添加了 MA5, MA10, MA20 列的 DataFrame
     """
     if ma_periods is None:
-        ma_periods = [5, 10, 20]
+        ma_periods = _DEFAULT_MA_PERIODS
 
     df = df.copy()
 
@@ -96,7 +114,7 @@ def create_kline_chart(
     """
     # 确定输出目录
     if output_dir is None:
-        output_dir = os.path.join(os.getcwd(), "charts_cache")
+        output_dir = CHART_CACHE_DIR
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -112,38 +130,18 @@ def create_kline_chart(
     # 添加 MA 均线指标
     df = add_ma_indicators(df)
 
-    # 设置 mplfinance 样式
-    mc = mpf.make_marketcolors(
-        up="green",
-        down="red",
-        edge="inherit",
-        wick="inherit",
-        volume="in",
-    )
-    style = mpf.make_mpf_style(
-        marketcolors=mc,
-        gridstyle="-",
-        gridcolor="#333333",
-        facecolor="white",
-        figcolor="white",
-        y_on_right=True,
-    )
-
     # 准备 MA 叠加数据（只添加有有效值的 MA 线）
     ma_plots = []
-    for period in [5, 10, 20]:
+    for period in _DEFAULT_MA_PERIODS:
         ma_col = f"MA{period}"
-        if ma_col in df.columns:
-            # 检查是否有有效值（非全 NaN）
-            if df[ma_col].notna().any():
-                color_map = {5: "purple", 10: "orange", 20: "blue"}
-                ma_plots.append(mpf.make_addplot(df[ma_col], color=color_map.get(period, "gray"), width=0.8))
+        if ma_col in df.columns and len(df) >= period:
+            ma_plots.append(mpf.make_addplot(df[ma_col], color=_MA_COLORS.get(period, "gray"), width=0.8))
 
     # 绘制图表
     fig, axes = mpf.plot(
         df,
         type="candle",
-        style=style,
+        style=_MPF_STYLE,
         title=f"{code} - K线 (MA5/MA10/MA20)",
         ylabel="价格",
         ylabel_lower="成交量",

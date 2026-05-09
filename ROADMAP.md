@@ -70,35 +70,59 @@ stdio JSON    stdio JSON
 
 ### 高优先级
 
-- [ ] **P0-1: DataService Action 扩展**
+- [x] **P0-1: DataService Action 扩展** ✅
   - 新增: `analyze` / `get_history` / `search_news` / `get_tasks` / `cancel_task`
-  - 当前只有 4 个 action (hello/get_markets/refresh/quit)
+  - 当前只有 4 个 action → 扩展至 10+ action
   - 文件: `src/data_service.py`
 
-- [ ] **P0-2: notification.py 模块化拆解**
-  - 拆分为: `channels/` (wechat/feishu/telegram/email/discord) + `formatters.py` + `dispatcher.py`
-  - 文件: `src/notification.py` (3112 行，需拆分)
-  - 目标: 单文件 < 800 行
+- [x] **P0-2: notification.py 模块化拆解** ✅
+  - 拆分为: `notify/channels/` (wechat/feishu/telegram/email/discord) + `formatters.py` + `dispatcher.py`
+  - 文件: `src/notification.py` → `src/notify/`
+  - 目标: 单文件 < 800 行 ✓
 
-- [ ] **P0-3: search_service.py 模块化**
-  - 拆分为: `search/bocha.py` + `tavily.py` + `serpapi.py` + `manager.py`
-  - 文件: `src/search_service.py` (1079 行)
+- [x] **P0-3: search_service.py 模块化** ✅
+  - 拆分为: `search_pkg/` (bocha/tavily/serpapi/manager)
+  - 文件: `src/search_service.py` → `src/search_pkg/`
 
 ### 中优先级
 
-- [ ] **P1-1: 数据层增强**
+- [x] **P1-1: 数据层增强** ✅
   - 添加 `schema_version` 字段支持数据库迁移
   - 行情历史表（用于 K 线回放）
   - 任务状态持久化
 
-- [ ] **P1-2: TUI/GUI 代码复用**
+- [x] **P1-2: TUI/GUI 代码复用** ✅
   - 抽取公共组件到 `shared/` 目录
   - 减少重复开发
 
-- [ ] **P1-3: 错误恢复增强**
+- [x] **P1-3: 错误恢复增强** ✅
   - DataService 崩溃后自动重启
   - 网络异常时本地缓存降级
   - AI API 429 限流自适应
+
+- [x] **P1-4: 持仓成本管理** ✅
+  - `src/portfolio.py` — Position dataclass + 成本盈亏计算
+  - DataService actions: add_position / remove_position / update_position / get_positions
+  - SQLite positions 表持久化
+  - 24 个测试
+
+- [x] **P1-5: K线历史回放** ✅
+  - `src/charts.py` — mplfinance 蜡烛图 + MA5/MA10/MA20
+  - `gui/pages/kline.py` — Flet K线页面
+  - DataService action: get_kline_data
+  - 11 个测试
+
+- [x] **P1-6: 机构动向追踪** ✅
+  - `src/institutional.py` — 大股东增减持 + 机构调研 + 龙虎榜
+  - DataService actions: get_institutional / get_dragon_board
+  - akshare 优先 + 搜索回退
+  - 9 个测试
+
+- [x] **P1-7: 简易回测引擎** ✅
+  - `src/backtester.py` — MA5/MA20 交叉策略回测
+  - 指标: total_return / max_drawdown / sharpe_ratio / win_rate
+  - DataService action: run_backtest
+  - 18 个测试
 
 ### 低优先级
 
@@ -132,21 +156,28 @@ stdio JSON    stdio JSON
 open-daily-stock/
 ├── main.py              # 唯一主入口
 ├── src/
-│   ├── data_service.py  # 后端守护进程 [P0-1 重点]
+│   ├── data_service.py  # 后端守护进程
 │   ├── analyzer.py      # AI 分析器
 │   ├── config.py        # 配置管理
 │   ├── pipeline.py      # 分析管线
-│   ├── notification.py  # 通知推送 [P0-2 拆分]
-│   ├── search_service.py # 搜索服务 [P0-3 拆分]
+│   ├── notification.py  # 通知推送（旧，保留兼容）
+│   ├── search_service.py # 搜索服务（旧，保留兼容）
+│   ├── portfolio.py     # 持仓成本管理 [P1-4]
+│   ├── charts.py        # K线图表生成 [P1-5]
+│   ├── institutional.py # 机构动向追踪 [P1-6]
+│   ├── backtester.py    # 回测引擎 [P1-7]
 │   ├── update_service.py # 自动更新
 │   ├── refresh_service.py # 数据刷新
-│   └── channels/       # [P0-2 拆分后] 通知渠道模块
-│       ├── wechat.py
-│       ├── feishu.py
-│       ├── telegram.py
-│       ├── email.py
-│       └── discord.py
-│   └── search/          # [P0-3 拆分后] 搜索模块
+│   ├── notify/          # 通知渠道模块 [P0-2]
+│   │   ├── channels/
+│   │   │   ├── wechat.py
+│   │   │   ├── feishu.py
+│   │   │   ├── telegram.py
+│   │   │   ├── email.py
+│   │   │   └── discord.py
+│   │   ├── formatters.py
+│   │   └── dispatcher.py
+│   └── search_pkg/      # 搜索模块 [P0-3]
 │       ├── bocha.py
 │       ├── tavily.py
 │       ├── serpapi.py
@@ -184,4 +215,4 @@ open-daily-stock/
 
 ---
 
-*最后更新: 2026-05-09*
+*最后更新: 2026-05-09 (P0-1~3 + P1-1~7 全部完成)*
