@@ -66,62 +66,58 @@ stdio JSON    stdio JSON
 
 ---
 
-## 三、PC Client 新架构（开发中）
-
-### 3.1 DataService 后端
-
-| 功能 | 状态 |
-|------|------|
-| 后端守护进程 fork 管理 | ✅ |
-| stdio JSON 通信协议 | ✅ |
-| SQLite 数据持久化 | ✅ |
-| 定时拉取 + 主动推送 | ✅ |
-| 进程崩溃恢复 | ✅ |
-
-### 3.2 双模式功能对等
-
-| 功能 | TUI | GUI |
-|------|-----|-----|
-| 行情展示 | ✅ | ✅ |
-| AI 分析触发 | ✅ | ✅ |
-| 配置管理 | ✅ | ✅ |
-| 首次启动引导 | ✅ | ✅ |
-| 任务历史 | ✅ | ✅ |
-| 日志查看 | ✅ | ✅ |
-
----
-
-## 四、待完成功能
+## 三、重构任务（优化架构）
 
 ### 高优先级
 
-- [x] DataService 后端实现（stdio 通信）✅
-- [x] TUI/GUI 双模式功能对等 ✅
-- [x] 首次启动引导（API Key 配置）✅
-- [x] 自动更新完善（GUI 状态栏更新按钮）✅
+- [ ] **P0-1: DataService Action 扩展**
+  - 新增: `analyze` / `get_history` / `search_news` / `get_tasks` / `cancel_task`
+  - 当前只有 4 个 action (hello/get_markets/refresh/quit)
+  - 文件: `src/data_service.py`
+
+- [ ] **P0-2: notification.py 模块化拆解**
+  - 拆分为: `channels/` (wechat/feishu/telegram/email/discord) + `formatters.py` + `dispatcher.py`
+  - 文件: `src/notification.py` (3112 行，需拆分)
+  - 目标: 单文件 < 800 行
+
+- [ ] **P0-3: search_service.py 模块化**
+  - 拆分为: `search/bocha.py` + `tavily.py` + `serpapi.py` + `manager.py`
+  - 文件: `src/search_service.py` (1079 行)
 
 ### 中优先级
 
-- [x] 行情异动提醒（涨跌超 5% 弹窗/通知）✅
-- [x] 分析进度显示 ✅
-- [x] 日志搜索/过滤 ✅
-- [x] 快捷键帮助面板（`?` 键 TUI）✅
+- [ ] **P1-1: 数据层增强**
+  - 添加 `schema_version` 字段支持数据库迁移
+  - 行情历史表（用于 K 线回放）
+  - 任务状态持久化
+
+- [ ] **P1-2: TUI/GUI 代码复用**
+  - 抽取公共组件到 `shared/` 目录
+  - 减少重复开发
+
+- [ ] **P1-3: 错误恢复增强**
+  - DataService 崩溃后自动重启
+  - 网络异常时本地缓存降级
+  - AI API 429 限流自适应
 
 ### 低优先级
 
-- [x] 历史分析回放 ✅
-- [x] K 线图表展示 ✅
-- [x] 多语言支持 ✅
+- [ ] **P2-1: 快捷键配置化**
+  - 从硬编码改为 `config.json` 读取
+
+- [ ] **P2-2: 主题切换**（深/浅色）
+
+- [ ] **P2-3: 多语言扩展**（日语、韩语）
 
 ---
 
-## 五、技术栈
+## 四、技术栈
 
 | 组件 | 技术 |
 |------|------|
 | TUI 框架 | Textual |
 | GUI 框架 | Flet >= 0.25 |
-| 数据获取 | AkShare、YFinance |
+| 数据获取 | AkShare、YFinance、efinance |
 | AI 分析 | Google Gemini / OpenAI 兼容 API |
 | 数据库 | SQLite |
 | 进程通信 | stdio JSON |
@@ -130,19 +126,31 @@ stdio JSON    stdio JSON
 
 ---
 
-## 六、项目结构
+## 五、项目结构
 
 ```
 open-daily-stock/
 ├── main.py              # 唯一主入口
 ├── src/
-│   ├── data_service.py  # 后端守护进程
+│   ├── data_service.py  # 后端守护进程 [P0-1 重点]
 │   ├── analyzer.py      # AI 分析器
 │   ├── config.py        # 配置管理
 │   ├── pipeline.py      # 分析管线
-│   ├── notification.py  # 通知推送
+│   ├── notification.py  # 通知推送 [P0-2 拆分]
+│   ├── search_service.py # 搜索服务 [P0-3 拆分]
 │   ├── update_service.py # 自动更新
-│   └── refresh_service.py # 数据刷新
+│   ├── refresh_service.py # 数据刷新
+│   └── channels/       # [P0-2 拆分后] 通知渠道模块
+│       ├── wechat.py
+│       ├── feishu.py
+│       ├── telegram.py
+│       ├── email.py
+│       └── discord.py
+│   └── search/          # [P0-3 拆分后] 搜索模块
+│       ├── bocha.py
+│       ├── tavily.py
+│       ├── serpapi.py
+│       └── manager.py
 ├── tui/                 # TUI 界面
 │   ├── app.py          # Textual App
 │   └── widgets/        # 各模块视图
@@ -155,3 +163,25 @@ open-daily-stock/
     ├── pyinstaller-hooks/
     └── workflows/       # 构建流程
 ```
+
+---
+
+## 六、重构优先级说明
+
+### 为什么 P0-1 (DataService) 最优先？
+- 当前 DataService 仅支持 4 个 action，但 TUI/GUI 客户端需要更多功能
+- 瓶颈不突破，其他功能无法通过 stdio 调用
+
+### 为什么 P0-2 (notification.py) 其次？
+- 3112 行单文件，接近维护上限
+- 新增通知渠道需要修改多处，耦合严重
+- 拆分后可独立测试和复用
+
+### 为什么 P0-3 (search_service.py) 第三？
+- 1079 行，逻辑相对独立
+- 拆分后可被 DataService 直接调用
+- 支持多 Key 负载均衡
+
+---
+
+*最后更新: 2026-05-09*
