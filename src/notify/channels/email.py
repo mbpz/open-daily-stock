@@ -5,6 +5,12 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from ..base import BaseChannel, ChannelResult, ChannelPriority
 
+try:
+    import markdown2
+    MARKDOWN_AVAILABLE = True
+except ImportError:
+    MARKDOWN_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,7 +54,14 @@ class EmailChannel(BaseChannel):
             msg["To"] = ", ".join(self.receivers) if self.receivers else self.sender
 
             # 添加 HTML 内容
-            html_part = MIMEText(content, "html", "utf-8")
+            # Convert Markdown to HTML
+            if MARKDOWN_AVAILABLE:
+                html_content = markdown2.markdown(content, extras=['break-on-newline'])
+            else:
+                # Fallback: just escape HTML and use <br> for newlines
+                html_content = content.replace('\n', '<br>')
+
+            html_part = MIMEText(html_content, "html", "utf-8")
             msg.attach(html_part)
 
             # 发送邮件

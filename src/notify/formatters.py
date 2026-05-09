@@ -86,9 +86,6 @@ class DashboardFormatter(BaseFormatter):
                 lines.append(f"**结论**: {core.get('one_sentence', '')}")
 
             battle = result.dashboard.get("battle_plan", {})
-            # 狙击点位
-        if result.dashboard:
-            battle = result.dashboard.get("battle_plan", {})
             sniper = battle.get("sniper_points", {}) if battle else {}
             if sniper:
                 ideal_buy = sniper.get("ideal_buy", "")
