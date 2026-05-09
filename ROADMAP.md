@@ -155,26 +155,26 @@ stdio JSON    stdio JSON
 ### 架构增强 P3
 
 - [x] **P3-8: 统一存储层** ✅ — 全部迁移到 storage.py SQLAlchemy ORM（29 tests）
-- [ ] **P3-9: WebSocket IPC 模式** — DataService 支持 WebSocket server，替代 stdio
+- [x] **P3-9: WebSocket IPC 模式** ✅ — DataService 支持 `--ws-server`，websockets 库，7 tests
 - [x] **P3-10: per-request 超时保护** ✅ — handler thread pool + 30s timeout（P1-3 完成）
-- [ ] **P3-11: ADR 文档** — docs/adr/ 目录，记录关键架构决策
+- [x] **P3-11: ADR 文档** ✅ — docs/adr/ 目录，4 篇架构决策记录
 
 ### 高级功能 P4
 
-- [ ] **P4-1: 画线工具** — K线图支持趋势线/斐波那契/支撑压力位
-- [ ] **P4-2: 模拟交易** — 虚拟资金(100万)记录模拟买卖，计算盈亏
-- [ ] **P4-3: 财务报表** — AkShare 财报接口：利润表/资产负债表/现金流量表
+- [x] **P4-1: 画线工具** ✅ — K线图支持斐波那契回撤 + 支撑压力位，23 tests
+- [x] **P4-2: 模拟交易** ✅ — 100万虚拟账户，5 个 DataService actions，26 tests
+- [x] **P4-3: 财务报表** ✅ — 利润表/资产负债表/现金流量表 + 关键指标，28 tests
 - [ ] **P4-4: Sparkline 迷你图** — Markets 每行行情显示1日迷你趋势线
 - [ ] **P4-5: 策略平台/社区** — 回测策略导入/导出 + GitHub open-daily-stock-strategies 仓库
 - [ ] **P4-6: data_provider 插件架构** — 付费数据源 Wind/东方财富 Data 可选接入
-- [ ] **P4-7: CN 因子 AI prompts** — A股专用分析模板（机构流向/行业轮动/宏观信号）
+- [x] **P4-7: CN 因子 AI prompts** ✅ — A股专用分析模板（机构流向/行业轮动/宏观信号），20 tests
 - [ ] **P4-8: 微信小程序/移动伴侣** — 微信小程序镜像通知视图 + 轻量查看页面
 
 ---
 
 ## 四、DataService Action 清单（P0-1 成果）
 
-当前注册 19 个 action：
+当前注册 26 个 action：
 
 | Action | 功能 | 来源 |
 |--------|------|------|
@@ -196,6 +196,14 @@ stdio JSON    stdio JSON
 | `get_institutional` | 机构动向 | P1-6 |
 | `get_dragon_board` | 龙虎榜 | P1-6 |
 | `run_backtest` | 运行回测 | P1-7 |
+| `get_drawing_data` | K线画线数据 | P4-1 |
+| `sim_buy` | 模拟买入 | P4-2 |
+| `sim_sell` | 模拟卖出 | P4-2 |
+| `sim_summary` | 模拟账户摘要 | P4-2 |
+| `sim_history` | 模拟交易历史 | P4-2 |
+| `sim_reset` | 重置模拟账户 | P4-2 |
+| `get_financials` | 财务报表 | P4-3 |
+| `get_key_metrics` | 关键财务指标 | P4-3 |
 
 ---
 
@@ -208,7 +216,7 @@ stdio JSON    stdio JSON
 | 数据获取 | AkShare、YFinance、efinance |
 | AI 分析 | Google Gemini / OpenAI 兼容 API |
 | 数据库 | SQLite |
-| 进程通信 | stdio JSON |
+| 进程通信 | stdio JSON / WebSocket |
 | 图表 | mplfinance (K线) |
 | 打包 | PyInstaller |
 | 构建 | GitHub Actions |
@@ -281,4 +289,4 @@ open-daily-stock/
 
 ---
 
-*最后更新: 2026-05-10 — P0-1~3 完成, P1-1~7 全部完成, P3-1~11 待实现*
+*最后更新: 2026-05-10 — P0-1~3 完成, P1-1~7 完成, P3-1~11 完成, P4-1~3/P4-7 完成, P4-4/5/6/8 待实现*
