@@ -12,6 +12,7 @@ from .base import BaseSearchProvider, SearchResult
 from .bocha import BochaProvider
 from .tavily import TavilyProvider
 from .serpapi import SerpapiProvider
+from .manager import SearchManager
 
 __all__ = [
     "SearchResult",
@@ -19,4 +20,5 @@ __all__ = [
     "BochaProvider",
     "TavilyProvider",
     "SerpapiProvider",
+    "SearchManager",
 ]
