@@ -133,6 +133,32 @@ stdio JSON    stdio JSON
 
 - [ ] **P2-3: 多语言扩展**（日语、韩语）
 
+### 功能增强 P3（竞品分析驱动）
+
+基于技术架构、产品功能、用户体验、市场策略4维度竞品分析。
+
+- [ ] **P3-1: 扩展技术指标** — RSI/MACD/Bollinger Bands/KDJ/WR/OBV（charts.py 扩展）
+- [ ] **P3-2: 股票选股器** — AkShare 筛选器：市值/PE/行业/涨跌幅 → 一键加入自选
+- [ ] **P3-3: Alert 配置 UI** — Config 页面 Alerts tab，股票+条件+渠道+开关
+- [ ] **P3-4: AI Verdict Badge** — 分析结果顶部显示看涨/看跌徽章 + 评分仪表
+- [ ] **P3-5: 实时更新闪烁** — 价格变化 cell 黄色闪烁 300ms
+- [ ] **P3-6: 成交量单位格式化** — A股/港股显示"万"，美股显示"M/K"
+- [ ] **P3-7: 市场状态指示器** — Markets 页显示 A股/港股/美股 交易中/盘前/休市
+
+### 架构增强 P3
+
+- [ ] **P3-8: 统一存储层** — 全部迁移到 storage.py SQLAlchemy ORM，消除 raw sqlite3
+- [ ] **P3-9: WebSocket IPC 模式** — DataService 支持 WebSocket server，替代 stdio
+- [ ] **P3-10: per-request 超时保护** — handler thread pool + 30s timeout
+- [ ] **P3-11: ADR 文档** — docs/adr/ 目录，记录关键架构决策
+
+### 高级功能 P4
+
+- [ ] **P4-1: 画线工具** — K线图支持趋势线/斐波那契/支撑压力位
+- [ ] **P4-2: 模拟交易** — 虚拟资金(100万)记录模拟买卖，计算盈亏
+- [ ] **P4-3: 财务报表** — AkShare 财报接口：利润表/资产负债表/现金流量表
+- [ ] **P4-4: Sparkline 迷你图** — Markets 每行行情显示1日迷你趋势线
+
 ---
 
 ## 四、DataService Action 清单（P0-1 成果）
