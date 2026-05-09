@@ -5,11 +5,12 @@ import sqlite3
 import logging
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 from typing import Dict, Any, List, Optional, Callable
 
 from .config import get_config
 from .alert_service import AlertService
+from .portfolio import Position
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,10 @@ class DataService:
             "get_tasks": "_handle_get_tasks",
             "get_task": "_handle_get_task",
             "cancel_task": "_handle_cancel_task",
+            "add_position": "_handle_add_position",
+            "remove_position": "_handle_remove_position",
+            "update_position": "_handle_update_position",
+            "get_positions": "_handle_get_positions",
             "quit": "_handle_quit",
         }
 
@@ -275,6 +280,167 @@ class DataService:
             task["status"] = "cancelled"
         return {"status": "ok", "message": "任务已取消"}
 
+    # === Position Handlers ===
+
+    def _handle_add_position(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """添加持仓"""
+        code = req.get("code")
+        name = req.get("name")
+        shares = req.get("shares")
+        buy_price = req.get("buy_price")
+        buy_date = req.get("buy_date")
+
+        # Validate required fields
+        if not code:
+            return {"status": "error", "message": "缺少股票代码 code 参数"}
+        if not name:
+            name = code  # Default to code if name not provided
+        if shares is None:
+            return {"status": "error", "message": "缺少 shares 参数"}
+        if buy_price is None:
+            return {"status": "error", "message": "缺少 buy_price 参数"}
+        if not buy_date:
+            return {"status": "error", "message": "缺少 buy_date 参数"}
+
+        try:
+            conn = sqlite3.connect(self._db_path)
+            c = conn.cursor()
+            now = datetime.now().isoformat()
+            c.execute("""
+                INSERT INTO positions (code, name, shares, buy_price, buy_date, current_price, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (code, name, shares, buy_price, buy_date, buy_price, now, now))
+            position_id = c.lastrowid
+            conn.commit()
+            conn.close()
+
+            # Return the created position
+            position = Position(
+                id=position_id,
+                code=code,
+                name=name,
+                shares=shares,
+                buy_price=buy_price,
+                buy_date=date.fromisoformat(buy_date),
+                current_price=buy_price,
+                created_at=datetime.fromisoformat(now),
+                updated_at=datetime.fromisoformat(now),
+            )
+            return {"status": "ok", "position": position.to_dict()}
+        except Exception as e:
+            logger.error(f"添加持仓失败: {e}")
+            return {"status": "error", "message": f"添加持仓失败: {str(e)}"}
+
+    def _handle_remove_position(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """删除持仓"""
+        position_id = req.get("id")
+        if position_id is None:
+            return {"status": "error", "message": "缺少 id 参数"}
+
+        try:
+            conn = sqlite3.connect(self._db_path)
+            c = conn.cursor()
+            c.execute("SELECT id FROM positions WHERE id = ?", (position_id,))
+            if c.fetchone() is None:
+                conn.close()
+                return {"status": "error", "message": f"持仓 {position_id} 不存在"}
+
+            c.execute("DELETE FROM positions WHERE id = ?", (position_id,))
+            conn.commit()
+            conn.close()
+            return {"status": "ok", "message": "持仓已删除"}
+        except Exception as e:
+            logger.error(f"删除持仓失败: {e}")
+            return {"status": "error", "message": f"删除持仓失败: {str(e)}"}
+
+    def _handle_update_position(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """更新持仓（当前价格等）"""
+        position_id = req.get("id")
+        if position_id is None:
+            return {"status": "error", "message": "缺少 id 参数"}
+
+        try:
+            conn = sqlite3.connect(self._db_path)
+            c = conn.cursor()
+            c.execute("SELECT * FROM positions WHERE id = ?", (position_id,))
+            row = c.fetchone()
+            if row is None:
+                conn.close()
+                return {"status": "error", "message": f"持仓 {position_id} 不存在"}
+
+            # Build update query dynamically
+            updates = []
+            params = []
+            if "current_price" in req:
+                updates.append("current_price = ?")
+                params.append(req["current_price"])
+            if "shares" in req:
+                updates.append("shares = ?")
+                params.append(req["shares"])
+            if "buy_price" in req:
+                updates.append("buy_price = ?")
+                params.append(req["buy_price"])
+
+            if not updates:
+                conn.close()
+                return {"status": "error", "message": "没有提供更新字段"}
+
+            updates.append("updated_at = ?")
+            params.append(datetime.now().isoformat())
+            params.append(position_id)
+
+            c.execute(f"UPDATE positions SET {', '.join(updates)} WHERE id = ?", params)
+            conn.commit()
+
+            # Fetch updated position
+            c.execute("SELECT * FROM positions WHERE id = ?", (position_id,))
+            row = c.fetchone()
+            conn.close()
+
+            position = Position(
+                id=row[0],
+                code=row[1],
+                name=row[2],
+                shares=row[3],
+                buy_price=row[4],
+                buy_date=date.fromisoformat(row[5]),
+                current_price=row[6],
+                created_at=datetime.fromisoformat(row[7]) if row[7] else None,
+                updated_at=datetime.fromisoformat(row[8]) if row[8] else None,
+            )
+            return {"status": "ok", "position": position.to_dict()}
+        except Exception as e:
+            logger.error(f"更新持仓失败: {e}")
+            return {"status": "error", "message": f"更新持仓失败: {str(e)}"}
+
+    def _handle_get_positions(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """获取所有持仓"""
+        try:
+            conn = sqlite3.connect(self._db_path)
+            c = conn.cursor()
+            c.execute("SELECT * FROM positions ORDER BY created_at DESC")
+            rows = c.fetchall()
+            conn.close()
+
+            positions = []
+            for row in rows:
+                position = Position(
+                    id=row[0],
+                    code=row[1],
+                    name=row[2],
+                    shares=row[3],
+                    buy_price=row[4],
+                    buy_date=date.fromisoformat(row[5]),
+                    current_price=row[6],
+                    created_at=datetime.fromisoformat(row[7]) if row[7] else None,
+                    updated_at=datetime.fromisoformat(row[8]) if row[8] else None,
+                )
+                positions.append(position.to_dict())
+            return {"status": "ok", "positions": positions}
+        except Exception as e:
+            logger.error(f"获取持仓失败: {e}")
+            return {"status": "error", "message": f"获取持仓失败: {str(e)}"}
+
     # === Existing Helper Methods ===
 
     def _init_db(self):
@@ -288,6 +454,19 @@ class DataService:
                 price REAL,
                 change_pct REAL,
                 volume INTEGER,
+                updated_at TEXT
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS positions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL,
+                name TEXT NOT NULL,
+                shares REAL NOT NULL,
+                buy_price REAL NOT NULL,
+                buy_date TEXT NOT NULL,
+                current_price REAL,
+                created_at TEXT,
                 updated_at TEXT
             )
         """)
