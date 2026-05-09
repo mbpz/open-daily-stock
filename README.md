@@ -62,22 +62,26 @@ python main.py --dry-run          # 仅获取数据
 ## 系统架构
 
 ```
-┌─────────────────────────────────────────────────┐
-│  用户启动 main.py                                │
-│  ↓                                               │
-│  主进程自动 fork DataService (后端守护进程)       │
-│  ↓ ↓                                             │
-│  TUI 子进程    GUI 子进程                        │
-│  (终端界面)    (Flet 图形界面)                    │
-│      ↓            ↓                             │
-│  stdio JSON 通信  stdio JSON 通信                │
-│      ↓            ↓                              │
-│  ←─── DataService (子进程守护) ───→              │
-│       ↓                                         │
-│  SQLite (数据持久化)                             │
-│       ↓                                         │
-│  AkShare/YFinance/Gemini API                    │
-└─────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────┐
+│  用户启动 main.py                                      │
+│  ↓                                                     │
+│  主进程自动 fork DataService (后端守护进程)             │
+│  ↓ ↓                                                   │
+│  TUI 子进程        GUI 子进程                           │
+│  (终端界面)        (Flet 图形界面)                      │
+│      ↓                ↓                                │
+│  stdio JSON 通信    stdio JSON 通信                     │
+│      ↓                ↓                                │
+│  ←─── DataService (子进程守护, 19 actions) ───→         │
+│       ├── 行情拉取 (AkShare/YFinance)                   │
+│       ├── AI 分析 (Gemini/OpenAI)                      │
+│       ├── 搜索 (Bocha/Tavily/SerpAPI)                   │
+│       ├── 持仓管理 (Portfolio)                          │
+│       ├── K线图表 (mplfinance)                          │
+│       ├── 机构追踪 (Institutional)                      │
+│       ├── 策略回测 (Backtester)                         │
+│       └── SQLite 持久化                                 │
+└───────────────────────────────────────────────────────┘
 ```
 
 **进程关系：**

@@ -94,9 +94,28 @@ TUI/GUI 客户端
 
 **请求格式（客户端 → DataService）：**
 ```json
+// 行情
 {"action": "get_markets"}
 {"action": "refresh_data"}
+// AI 分析
 {"action": "analyze", "code": "600519"}
+// 历史数据 & 图表
+{"action": "get_history", "code": "600519"}
+{"action": "get_kline_data", "code": "600519", "days": 60}
+// 搜索
+{"action": "search_news", "code": "600519"}
+// 持仓
+{"action": "add_position", "code": "600519", "name": "茅台", "shares": 100, "buy_price": 1800.0}
+{"action": "get_positions"}
+// 机构追踪
+{"action": "get_institutional", "code": "600519"}
+{"action": "get_dragon_board"}
+// 回测
+{"action": "run_backtest", "code": "600519", "days": 120, "initial_capital": 100000}
+// 任务管理
+{"action": "get_tasks"}
+{"action": "cancel_task", "task_id": "xxx"}
+// 配置
 {"action": "get_config"}
 {"action": "update_config", "data": {...}}
 ```

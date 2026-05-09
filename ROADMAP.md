@@ -86,16 +86,16 @@ stdio JSON    stdio JSON
 
 ### 中优先级
 
-- [x] **P1-1: 数据层增强** ✅
+- [ ] **P1-1: 数据层增强**
   - 添加 `schema_version` 字段支持数据库迁移
   - 行情历史表（用于 K 线回放）
   - 任务状态持久化
 
-- [x] **P1-2: TUI/GUI 代码复用** ✅
+- [ ] **P1-2: TUI/GUI 代码复用**
   - 抽取公共组件到 `shared/` 目录
   - 减少重复开发
 
-- [x] **P1-3: 错误恢复增强** ✅
+- [ ] **P1-3: 错误恢复增强**
   - DataService 崩溃后自动重启
   - 网络异常时本地缓存降级
   - AI API 429 限流自适应
@@ -135,7 +135,34 @@ stdio JSON    stdio JSON
 
 ---
 
-## 四、技术栈
+## 四、DataService Action 清单（P0-1 成果）
+
+当前注册 19 个 action：
+
+| Action | 功能 | 来源 |
+|--------|------|------|
+| `hello` | 健康检查 | 原有 |
+| `get_markets` | 获取行情数据 | 原有 |
+| `refresh` | 刷新数据 | 原有 |
+| `quit` | 退出服务 | 原有 |
+| `analyze` | AI 分析 | P0-1 |
+| `get_history` | 获取历史数据 | P0-1 |
+| `search_news` | 搜索新闻 | P0-1 |
+| `get_kline_data` | K线数据 | P1-5 |
+| `get_tasks` | 任务列表 | P0-1 |
+| `get_task` | 单个任务详情 | P0-1 |
+| `cancel_task` | 取消任务 | P0-1 |
+| `add_position` | 添加持仓 | P1-4 |
+| `remove_position` | 删除持仓 | P1-4 |
+| `update_position` | 更新持仓 | P1-4 |
+| `get_positions` | 持仓列表 | P1-4 |
+| `get_institutional` | 机构动向 | P1-6 |
+| `get_dragon_board` | 龙虎榜 | P1-6 |
+| `run_backtest` | 运行回测 | P1-7 |
+
+---
+
+## 五、技术栈
 
 | 组件 | 技术 |
 |------|------|
@@ -145,12 +172,13 @@ stdio JSON    stdio JSON
 | AI 分析 | Google Gemini / OpenAI 兼容 API |
 | 数据库 | SQLite |
 | 进程通信 | stdio JSON |
+| 图表 | mplfinance (K线) |
 | 打包 | PyInstaller |
 | 构建 | GitHub Actions |
 
 ---
 
-## 五、项目结构
+## 六、项目结构
 
 ```
 open-daily-stock/
@@ -162,6 +190,7 @@ open-daily-stock/
 │   ├── pipeline.py      # 分析管线
 │   ├── notification.py  # 通知推送（旧，保留兼容）
 │   ├── search_service.py # 搜索服务（旧，保留兼容）
+│   ├── alert_service.py  # 告警服务
 │   ├── portfolio.py     # 持仓成本管理 [P1-4]
 │   ├── charts.py        # K线图表生成 [P1-5]
 │   ├── institutional.py # 机构动向追踪 [P1-6]
@@ -197,7 +226,7 @@ open-daily-stock/
 
 ---
 
-## 六、重构优先级说明
+## 七、重构优先级说明
 
 ### 为什么 P0-1 (DataService) 最优先？
 - 当前 DataService 仅支持 4 个 action，但 TUI/GUI 客户端需要更多功能
@@ -215,4 +244,4 @@ open-daily-stock/
 
 ---
 
-*最后更新: 2026-05-09 (P0-1~3 + P1-1~7 全部完成)*
+*最后更新: 2026-05-09 — P0-1~3 完成, P1-4~7 完成, P1-1~3 待实现*
