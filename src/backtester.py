@@ -112,8 +112,8 @@ def _calculate_returns(data: List[Dict], trades: List[Dict], initial_capital: fl
                     position_entry_price = trade["price"]
                     trade_index += 1
                 else:
-                    # Not enough cash to buy
-                    break
+                    # Not enough cash to buy - skip this trade and move to next day
+                    trade_index += 1
             elif trade["action"] == "sell":
                 # Sell shares
                 proceeds = trade["price"] * trade["shares"]
@@ -213,8 +213,9 @@ def backtest(history_data: List[Dict], initial_capital: float, strategy_fn: Call
 
     sharpe_ratio = _calculate_sharpe_ratio(daily_returns)
 
-    # Count trades and wins
+    # Count completed sell trades and winning trades
     num_trades = len(trades)
+    completed_sells = 0
     winning_trades = 0
 
     # Track positions to calculate P&L
@@ -230,6 +231,7 @@ def backtest(history_data: List[Dict], initial_capital: float, strategy_fn: Call
                 shares += trade["shares"]
                 position_entry_price = trade["price"]
         elif trade["action"] == "sell":
+            completed_sells += 1
             if shares > 0:
                 proceeds = trade["price"] * trade["shares"]
                 pnl = proceeds - (position_entry_price * shares)
@@ -239,7 +241,7 @@ def backtest(history_data: List[Dict], initial_capital: float, strategy_fn: Call
                 shares = 0
                 position_entry_price = 0
 
-    win_rate = (winning_trades / num_trades * 100) if num_trades > 0 else 0.0
+    win_rate = (winning_trades / completed_sells * 100) if completed_sells > 0 else 0.0
 
     return BacktestResult(
         total_return=round(total_return, 2),
