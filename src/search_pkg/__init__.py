@@ -9,8 +9,10 @@
 提供 key 轮换和结果合并。
 """
 from .base import BaseSearchProvider, SearchResult
+from .bocha import BochaProvider
 
 __all__ = [
     "SearchResult",
     "BaseSearchProvider",
+    "BochaProvider",
 ]
