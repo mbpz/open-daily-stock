@@ -10,9 +10,13 @@
 """
 from .base import BaseSearchProvider, SearchResult
 from .bocha import BochaProvider
+from .tavily import TavilyProvider
+from .serpapi import SerpapiProvider
 
 __all__ = [
     "SearchResult",
     "BaseSearchProvider",
     "BochaProvider",
+    "TavilyProvider",
+    "SerpapiProvider",
 ]
