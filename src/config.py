@@ -12,7 +12,7 @@ A股自选股智能分析系统 - 配置管理模块
 
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 from dotenv import load_dotenv, dotenv_values
 from dataclasses import dataclass, field
 
@@ -123,7 +123,18 @@ class Config:
 
     # === 语言配置 ===
     language: str = "zh_CN"  # 语言偏好: zh_CN 或 en_US
-    
+
+    # === 技术指标配置 ===
+    indicators: Dict[str, bool] = field(default_factory=lambda: {
+        "ma": True,
+        "rsi": True,
+        "macd": True,
+        "kdj": False,
+        "wr": False,
+        "obv": False,
+        "bollinger": False,
+    })
+
     # === 定时任务配置 ===
     schedule_enabled: bool = False            # 是否启用定时任务
     schedule_time: str = "18:00"              # 每日推送时间（HH:MM 格式）
