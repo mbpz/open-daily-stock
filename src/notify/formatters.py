@@ -86,15 +86,21 @@ class DashboardFormatter(BaseFormatter):
                 lines.append(f"**结论**: {core.get('one_sentence', '')}")
 
             battle = result.dashboard.get("battle_plan", {})
-            sniper = battle.get("sniper_points", {})
+            # 狙击点位
+        if result.dashboard:
+            battle = result.dashboard.get("battle_plan", {})
+            sniper = battle.get("sniper_points", {}) if battle else {}
             if sniper:
-                lines.append("")
-                if sniper.get("ideal_buy"):
-                    lines.append(f"  🎯 买点: {sniper['ideal_buy']}")
-                if sniper.get("stop_loss"):
-                    lines.append(f"  🛑 止损: {sniper['stop_loss']}")
-                if sniper.get("take_profit"):
-                    lines.append(f"  🎊 目标: {sniper['take_profit']}")
+                ideal_buy = sniper.get("ideal_buy", "")
+                stop_loss = sniper.get("stop_loss", "")
+                take_profit = sniper.get("take_profit", "")
+
+                if ideal_buy:
+                    lines.append(f"  🎯 买点: {ideal_buy}")
+                if stop_loss:
+                    lines.append(f"  🛑 止损: {stop_loss}")
+                if take_profit:
+                    lines.append(f"  🎊 目标: {take_profit}")
 
         lines.append("")
         lines.append(f"_{result.analysis_summary[:100]}_")
