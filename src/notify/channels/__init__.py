@@ -1,2 +1,4 @@
 """通知渠道模块"""
-__all__ = []
+from .wechat import WechatChannel
+
+__all__ = ["WechatChannel"]
