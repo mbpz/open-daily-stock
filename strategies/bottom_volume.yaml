@@ -1,0 +1,35 @@
+# Bottom Volume Strategy / 底部放量
+# Volume surges at price bottom, suggesting distribution or accumulation.
+
+name: bottom_volume
+display_name: 底部放量
+description: 股价低位放量异动，可能预示主力介入或出货，需结合位置判断。
+category: momentum
+required_indicators: [volume_ratio, close, pct_chg, rsi]
+conditions:
+  entry:
+    - name: volume_surge_at_bottom
+      description: Volume > 3x average on down day (price still falling)
+      check: volume_ratio > 3.0 and pct_chg < -2
+    - name: rsi_oversold
+      description: RSI at oversold level
+      check: rsi < 30
+    - name: price_near_support
+      description: Price near significant support level
+      check: abs(close - support_level) / support_level < 0.05
+  exit:
+    - name: volume_persists
+      description: Volume continues elevated for 3+ days
+      check: volume_ratio < 2.0
+    - name: recovery_abandoned
+      description: Price fails to recover after 3 days
+      check: close < entry_price * 0.95
+scoring:
+  base: 50
+  extreme_volume: +15
+  oversold_rsi: +10
+  support_test: +8
+  no_recovery_3days: -12
+signal_output:
+  indicator: "底部放量"
+  action_required: "观察/谨慎买入"

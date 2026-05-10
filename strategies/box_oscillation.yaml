@@ -1,0 +1,36 @@
+# Box Oscillation Strategy / 箱体震荡
+# Price oscillates within a range — buy at support, sell at resistance.
+
+name: box_oscillation
+display_name: 箱体震荡
+description: 股价在箱体区间内震荡，高抛低吸策略。适用于横盘整理行情。
+category: range
+required_indicators: [close, support, resistance, volume_ratio]
+conditions:
+  entry:
+    - name: at_support
+      description: Price touches or approaches support level
+      check: (support - close) / support < 0.02
+    - name: volume_stable
+      description: Volume average (no breakout intent)
+      check: 0.7 < volume_ratio < 1.3
+    - name: range_confirmed
+      description: At least 20 days of range-bound oscillation
+      check: range_days >= 20
+  exit:
+    - name: near_resistance
+      description: Price approaches resistance
+      check: (close - resistance) / resistance > -0.02
+    - name: range_broken
+      description: Price breaks out of range on volume
+      check: volume_ratio > 2.0 and (close > resistance or close < support)
+scoring:
+  base: 50
+  at_support: +12
+  stable_volume: +6
+  long_consolidation: +5
+  breakout_direction: +8
+  false_breakout: -10
+signal_output:
+  indicator: "箱体震荡"
+  action_required: "高抛低吸"

@@ -1,0 +1,36 @@
+# Mean Reversion Strategy / 均线回归
+# Signal when price diverges significantly from moving average (oversold/overbought).
+
+name: mean_reversion
+display_name: 均线回归
+description: 价格偏离均线过大时的均值回归机会，适用震荡市场。
+category: oscillator
+required_indicators: [bias_ma5, bias_ma10, rsi, volume_ratio]
+conditions:
+  entry:
+    - name: oversold_pullback
+      description: Price oversold on MA5 (bias < -5%) with RSI < 40
+      check: bias_ma5 < -0.05 and rsi < 40
+    - name: volume_stable
+      description: Volume not expanding during decline (no distribution)
+      check: volume_ratio < 1.5
+    - name: near_support
+      description: Near established support level
+      check: close >= support_level
+  exit:
+    - name: mean_reversion_complete
+      description: Price returns to within 1% of MA5
+      check: abs(bias_ma5) < 0.01
+    - name: overbought
+      description: RSI overbought zone
+      check: rsi > 70
+scoring:
+  base: 50
+  oversold_rsi: +12
+  extreme_bias: +10
+  support_confirmed: +8
+  volume_expanding_on_decline: -8
+  rsi_overbought: -10
+signal_output:
+  indicator: "均值回归"
+  action_required: "买入"

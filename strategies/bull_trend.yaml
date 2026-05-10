@@ -1,0 +1,39 @@
+# Bull Trend Strategy / 多头趋势
+# Default strategy for identifying upward-trending stocks with pullback entries.
+
+name: bull_trend
+display_name: 多头趋势
+description: 默认个股分析策略，识别多头排列、趋势延续与回踩低吸机会。
+category: trend
+aliases: [趋势, 趋势分析, 多头趋势]
+default_active: true
+default_router: true
+required_indicators: [ma5, ma10, ma20, bias_ma5]
+conditions:
+  entry:
+    - name: ma_bullish_alignment
+      description: MA5 >= MA10 >= MA20 with upward slope on MA20
+      check: ma5 >= ma10 and ma10 >= ma20 and ma20_slope > 0
+    - name: not_broken_ma20
+      description: Price hasn't fallen below MA20
+      check: close >= ma20
+    - name: volume_on_breakout
+      description: Volume confirmation on any breakout
+      check: volume_ratio > 1.1
+  exit:
+    - name: ma_bearish_alignment
+      description: MA5 falls below MA20
+      check: ma5 < ma20
+    - name: ma20_broken
+      description: Price closes below MA20
+      check: close < ma20
+scoring:
+  base: 50
+  strong_bull_alignment: +12
+  pullback_rebound: +8
+  volume_breakout: +10
+  ma20_broken: -12
+  overextended: -8
+signal_output:
+  indicator: "多头趋势"
+  action_required: "持有/加仓"

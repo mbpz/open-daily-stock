@@ -1,10 +1,39 @@
-# Strategies - Community Strategy Platform
+# Strategies — Community Strategy Platform
 
-## Overview
+**Built-in strategies** are defined in `strategies/*.yaml` (YAML DSL, P6-1).
+**Community strategies** are JSON files managed via the GUI/TUI strategy platform.
+
+## Built-in YAML Strategies (P6-1)
+
+See [STRATEGIES_YAML.md](docs/superpowers/plans/STRATEGIES_YAML.md) for the DSL spec.
+
+Quick reference:
+
+```yaml
+name: ma_golden_cross
+display_name: 均线金叉
+category: trend
+conditions:
+  entry:
+    - name: ma_golden_cross
+      check: "prev_ma5 <= prev_ma10 and curr_ma5 > curr_ma10"
+scoring:
+  base: 50
+  ma_cross: +10
+```
+
+Available: `ma_golden_cross`, `bull_trend`, `volume_breakout`, `shrink_pullback`, `bottom_volume`, `mean_reversion`, `box_oscillation`
+
+```python
+from src.strategies import get_strategy, list_strategies
+s = get_strategy("均线金叉")   # by name or alias
+for strat in list_strategies(category="trend"):
+    print(strat.display_name)
+```
+
+## Community Strategy JSON Format
 
 The strategy platform lets you save, share, and run backtest strategies as structured JSON files. Strategies define entry/exit rules, parameters, and indicators for the backtesting engine.
-
-## Strategy JSON Format
 
 ```json
 {

@@ -1,0 +1,39 @@
+# MA Golden Cross Strategy / 均线金叉
+# Buy when MA5 crosses above MA10, confirmed by volume > 1.2x 5-day average.
+
+name: ma_golden_cross
+display_name: 均线金叉
+description: 检测均线金叉配合量能确认信号，经典的趋势反转/延续信号。
+category: trend
+required_indicators: [ma5, ma10, ma20]
+conditions:
+  entry:
+    - name: ma_golden_cross
+      description: MA5 crosses above MA10 within last 3 days
+      check: |
+        prev_ma5 <= prev_ma10 and curr_ma5 > curr_ma10
+    - name: volume_confirmation
+      description: Volume > 1.2x 5-day average on signal day
+      check: volume_ratio > 1.2
+    - name: price_near_ma
+      description: Price within 5% of MA10 (avoid chasing)
+      check: abs(close - ma10) / ma10 < 0.05
+  exit:
+    - name: ma_death_cross
+      description: MA5 crosses below MA10
+      check: prev_ma5 >= prev_ma10 and curr_ma5 < curr_ma10
+    - name: stop_loss
+      description: Price falls more than 5% below entry
+      check: close < entry_price * 0.95
+scoring:
+  base: 50
+  ma_cross: +10
+  macd_golden_cross: +5
+  volume_confirmed: +8
+  strong_trend_ma10_above_ma20: +7
+  near_support: +5
+  overextended_biased_ma5: -10
+signal_output:
+  indicator: "MA金叉"
+  action_required: "买入"
+aliases: [均线金叉, 金叉, ma_cross]

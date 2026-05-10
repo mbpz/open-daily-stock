@@ -1,0 +1,38 @@
+# Volume Breakout Strategy / 放量突破
+# Price breaks above resistance on volume > 2x average.
+
+name: volume_breakout
+display_name: 放量突破
+description: 检测放量突破阻力位信号。适用于股价接近已知阻力位时。
+category: momentum
+required_indicators: [volume_ratio, resistance, close]
+conditions:
+  entry:
+    - name: volume_surge
+      description: Volume > 2x 5-day average
+      check: volume_ratio > 2.0
+    - name: price_breakout
+      description: Close above resistance level
+      check: close > resistance_level
+    - name: strong_close
+      description: Close in upper 30% of daily range
+      check: (close - low) / (high - low) > 0.7
+    - name: not_overextended
+      description: Bias < 5% (avoid chasing)
+      check: abs(bias_ma5) < 0.05
+  exit:
+    - name: reversal_below_resistance
+      description: Close falls back below resistance
+      check: close < resistance_level
+    - name: stop_loss
+      description: Stop loss 3% below breakout level
+      check: close < breakout_level * 0.97
+scoring:
+  base: 50
+  volume_breakout: +12
+  sector_rally: +5
+  near_previous_high: +3
+  overextended: -8
+signal_output:
+  indicator: "放量突破"
+  action_required: "买入"

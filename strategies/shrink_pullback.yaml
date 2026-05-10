@@ -1,0 +1,38 @@
+# Shrink Pullback Strategy / 缩量回踩
+# Volume shrinks on pullback to MA5/MA10, suggesting accumulation.
+
+name: shrink_pullback
+display_name: 缩量回踩
+description: 缩量回踩均线获支撑，经典吸筹信号。适用于上升趋势中的正常回调。
+category: trend
+required_indicators: [volume_ratio, bias_ma5, ma5, close]
+conditions:
+  entry:
+    - name: pullback_to_ma5
+      description: Price pulls back to within 3% of MA5
+      check: 0 <= bias_ma5 <= 0.03
+    - name: volume_shrink
+      description: Volume < 60% of 5-day average on pullback
+      check: volume_ratio < 0.6
+    - name: ma_bullish
+      description: MA5 still above MA10 (trend intact)
+      check: ma5 > ma10
+    - name: prior_up_volume
+      description: Prior up day had volume > average (confirms trend)
+      check: prior_volume_ratio > 1.2
+  exit:
+    - name: ma5_broken
+      description: MA5 support broken
+      check: close < ma5 * 0.97
+    - name: trend_broken
+      description: MA5 crosses below MA10
+      check: ma5 < ma10
+scoring:
+  base: 50
+  volume_shrink: +12
+  tight_pullback: +8
+  prior_strong_volume: +6
+  ma5_ma10_widening: -6
+signal_output:
+  indicator: "缩量回踩"
+  action_required: "买入/加仓"
