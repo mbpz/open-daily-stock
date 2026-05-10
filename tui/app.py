@@ -12,14 +12,16 @@ from tui.widgets.tasks import TasksView
 from tui.widgets.analyze import AnalyzeView
 from tui.widgets.config import ConfigView
 from tui.widgets.logs import LogsView
+from tui.widgets.strategies import StrategiesView
 from tui.data.wrapper import DataProviderWrapper
 from tui.data.task_store import TaskStore
 from src.config import get_config
 from src.service_client import ServiceClient
 from src.i18n import _
+from src.shared.theme import get_current_theme
 from typing import Optional
 
-MODULES = [MarketsView, TasksView, AnalyzeView, ConfigView, LogsView]
+MODULES = [MarketsView, TasksView, AnalyzeView, ConfigView, LogsView, StrategiesView]
 
 # 默认按键映射（当 config.json 未配置 keybindings 时使用）
 _DEFAULT_KEYBINDINGS = {
@@ -29,6 +31,7 @@ _DEFAULT_KEYBINDINGS = {
     "3": "analyze",
     "4": "config",
     "5": "logs",
+    "6": "strategies",
     "tab": "next_module",
     "r": "refresh",
     "?": "help",
@@ -43,6 +46,7 @@ _ACTION_MAP = {
     "analyze": "switch(2)",
     "config": "switch(3)",
     "logs": "switch(4)",
+    "strategies": "switch(5)",
     "next_module": "next_module",
     "refresh": "refresh",
     "help": "help",
@@ -57,21 +61,46 @@ _ACTION_LABELS = {
     "analyze": _("分析"),
     "config": _("配置"),
     "logs": _("日志"),
+    "strategies": _("策略"),
     "next_module": _("下一模块"),
     "refresh": _("刷新"),
     "help": _("帮助"),
     "toggle_theme": _("切换主题"),
 }
 
-# 主题 CSS
+# 主题 CSS (derived from shared theme on first access)
+def _build_theme_css() -> dict:
+    """Build theme CSS from shared theme constants."""
+    t = get_current_theme()
+    return {
+        "screen_bg": t["bg"],
+        "text": t["fg"],
+        "card_bg": t["bg_card"],
+        "accent": t["accent"],
+        "danger": t["danger"],
+        "warning": t["warning"],
+        "border": t["border"],
+    }
+
+# Bootstrap with dark theme as default (get_current_theme needs config loaded)
 _THEME_CSS = {
     "dark": {
-        "screen_bg": "#1a1a2e",
+        "screen_bg": "#1e1e1e",
         "text": "#e0e0e0",
+        "card_bg": "#2d2d2d",
+        "accent": "#4CAF50",
+        "danger": "#F44336",
+        "warning": "#FFC107",
+        "border": "#404040",
     },
     "light": {
-        "screen_bg": "#f5f5f5",
-        "text": "#212121",
+        "screen_bg": "#ffffff",
+        "text": "#1e1e1e",
+        "card_bg": "#f5f5f5",
+        "accent": "#2E7D32",
+        "danger": "#C62828",
+        "warning": "#F57F17",
+        "border": "#d0d0d0",
     },
 }
 
@@ -233,6 +262,7 @@ class TUIApp(App):
         yield AnalyzeView(self._on_analyze_callback)
         yield ConfigView()
         yield LogsView()
+        yield StrategiesView(self._client)
         yield HelpPanel(self._close_help, self._keybindings)
 
     def on_mount(self):

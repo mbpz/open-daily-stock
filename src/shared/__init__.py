@@ -18,6 +18,8 @@ from .sparkline import (
     generate_change_sparkline,
 )
 from .keybindings import get_keybinding, get_all_keybindings
+from .theme import DARK_THEME, LIGHT_THEME, get_theme, get_current_theme
+from .i18n import TRANSLATIONS, DEFAULT_LANG, get_current_lang, t, get_available_languages
 
 __all__ = [
     "MARKET_UP_COLOR", "MARKET_DOWN_COLOR", "MARKET_NEUTRAL_COLOR", "NEUTRAL_COLOR",
@@ -33,4 +35,6 @@ __all__ = [
     "generate_sparkline_with_color",
     "generate_change_sparkline",
     "get_keybinding", "get_all_keybindings",
+    "DARK_THEME", "LIGHT_THEME", "get_theme", "get_current_theme",
+    "TRANSLATIONS", "DEFAULT_LANG", "get_current_lang", "t", "get_available_languages",
 ]

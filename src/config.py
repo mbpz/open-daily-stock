@@ -123,7 +123,7 @@ class Config:
     https_proxy: Optional[str] = None # HTTPS 代理
 
     # === 语言配置 ===
-    language: str = "zh_CN"  # 语言偏好: zh_CN 或 en_US
+    language: str = "zh"  # 语言偏好: zh / ja / ko
 
     # === UI 配置 (config.json) ===
     keybindings: Dict[str, Dict[str, str]] = field(default_factory=lambda: {
@@ -458,7 +458,7 @@ class Config:
             # 行情异动提醒配置
             alerts_enabled=os.getenv('ALERTS_ENABLED', 'false').lower() == 'true',
             alerts_threshold_pct=float(os.getenv('ALERTS_THRESHOLD_PCT', '5.0')),
-            language=os.getenv('LANGUAGE', 'zh_CN')
+            language=os.getenv('LANGUAGE', 'zh')
         )
         # 从 config.json 加载 UI 配置（keybindings, theme）
         cls.load_json_config(config)
@@ -485,7 +485,8 @@ class Config:
         如果文件不存在或字段缺失则使用默认值（向后兼容）。
 
         向后兼容：自动将旧版 flat keybindings (key->action) 迁移为
-        新版 nested keybindings (section->{action->key})。
+        新版 nested keybindings (section->{action->key})，同时保留
+        其他 section 的默认值。
         """
         json_path = cls._get_json_path()
         try:
@@ -499,11 +500,14 @@ class Config:
                         # 新版 nested format: {section: {action: key}}
                         config.keybindings = kbs
                     else:
-                        # 旧版 flat format: {key: action} → 迁移为 {"global": {action: key}}
-                        migrated = {}
+                        # 旧版 flat format: {key: action} → 迁移为 nested 格式
+                        # 1. 创建默认 nested 结构（包含所有 section）
+                        default_config = cls()
+                        migrated = dict(default_config.keybindings)
+                        # 2. 反转旧 flat 格式为 {action: key} 并覆盖 global section
                         for key, action_name in kbs.items():
-                            migrated[action_name] = key
-                        config.keybindings = {"global": migrated}
+                            migrated["global"][action_name] = key
+                        config.keybindings = migrated
                 if 'theme' in data and isinstance(data['theme'], str):
                     config.theme = data['theme']
         except (json.JSONDecodeError, IOError):

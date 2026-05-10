@@ -10,6 +10,7 @@ from datetime import datetime, date
 from typing import Dict, Any, List, Optional, Callable
 
 import sqlite3
+from pathlib import Path
 from .config import get_config
 from .alert_service import AlertService
 from .storage import get_db, get_market_cache
@@ -100,6 +101,14 @@ class DataService:
             "sim_reset": "_handle_sim_reset",
             "get_keybindings": "_handle_get_keybindings",
             "list_providers": "_handle_list_providers",
+            "export_strategy": "_handle_export_strategy",
+            "import_strategy": "_handle_import_strategy",
+            "list_strategies": "_handle_list_strategies",
+            "delete_strategy": "_handle_delete_strategy",
+            "get_theme": "_handle_get_theme",
+            "set_theme": "_handle_set_theme",
+            "get_languages": "_handle_get_languages",
+            "set_language": "_handle_set_language",
         }
 
         # Simulated trading account
@@ -108,6 +117,10 @@ class DataService:
         # Task storage for async operations
         self._tasks: Dict[str, Dict[str, Any]] = {}
         self._tasks_lock = threading.Lock()
+
+        # Strategy storage directory
+        self._strategies_dir = Path(__file__).parent.parent / "strategies"
+        self._strategies_dir.mkdir(parents=True, exist_ok=True)
 
         # Load external data provider plugins
         self._load_plugins()
@@ -1127,6 +1140,126 @@ class DataService:
         """发送 JSON 到 stdout"""
         print(json.dumps(data), flush=True)
 
+    # === Strategy Import/Export Handlers ===
+
+    def _get_strategy_path(self, name: str) -> Path:
+        """Get file path for a strategy name (sanitized)."""
+        safe_name = "".join(c for c in name if c.isalnum() or c in " _-").rstrip()
+        if not safe_name:
+            safe_name = "unnamed"
+        return self._strategies_dir / f"{safe_name}.json"
+
+    def _load_all_strategies(self) -> List[Dict[str, Any]]:
+        """Load all strategy files from the strategies directory."""
+        strategies = []
+        if not self._strategies_dir.exists():
+            return strategies
+        for file_path in sorted(self._strategies_dir.glob("*.json")):
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                data["_filename"] = file_path.name
+                strategies.append(data)
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning(f"Failed to load strategy file {file_path}: {e}")
+        return strategies
+
+    def _handle_export_strategy(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """Export current backtest configuration as a strategy JSON file."""
+        name = req.get("name", "").strip()
+        if not name:
+            return {"status": "error", "message": "missing strategy name parameter"}
+
+        strategy = {
+            "name": name,
+            "version": req.get("version", "1.0"),
+            "description": req.get("description", ""),
+            "author": req.get("author", ""),
+            "params": req.get("params", {
+                "fast_ma": 5,
+                "slow_ma": 20,
+                "initial_capital": 100000,
+                "stop_loss_pct": -5.0,
+            }),
+            "code": req.get("code", "python"),
+            "indicators": req.get("indicators", ["ma5", "ma20"]),
+            "entry_rule": req.get("entry_rule", ""),
+            "exit_rule": req.get("exit_rule", ""),
+        }
+
+        file_path = self._get_strategy_path(name)
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(strategy, f, ensure_ascii=False, indent=2)
+            return {"status": "ok", "data": strategy, "message": f"Strategy '{name}' exported"}
+        except OSError as e:
+            logger.error(f"Failed to export strategy '{name}': {e}")
+            return {"status": "error", "message": f"Export failed: {str(e)}"}
+
+    def _handle_import_strategy(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """Import a strategy from JSON data (string or dict)."""
+        data = req.get("data")
+        if not data:
+            return {"status": "error", "message": "missing strategy data parameter"}
+
+        if isinstance(data, str):
+            try:
+                strategy = json.loads(data)
+            except json.JSONDecodeError as e:
+                return {"status": "error", "message": f"JSON parse failed: {str(e)}"}
+        elif isinstance(data, dict):
+            strategy = data
+        else:
+            return {"status": "error", "message": "data must be JSON string or dict"}
+
+        name = strategy.get("name", "").strip()
+        if not name:
+            return {"status": "error", "message": "strategy data missing name field"}
+
+        strategy.setdefault("version", "1.0")
+        strategy.setdefault("description", "")
+        strategy.setdefault("author", "")
+        strategy.setdefault("params", {})
+        strategy.setdefault("code", "python")
+        strategy.setdefault("indicators", [])
+        strategy.setdefault("entry_rule", "")
+        strategy.setdefault("exit_rule", "")
+
+        file_path = self._get_strategy_path(name)
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(strategy, f, ensure_ascii=False, indent=2)
+            return {"status": "ok", "data": strategy, "message": f"Strategy '{name}' imported"}
+        except OSError as e:
+            logger.error(f"Failed to import strategy '{name}': {e}")
+            return {"status": "error", "message": f"Import failed: {str(e)}"}
+
+    def _handle_list_strategies(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """List all saved strategies."""
+        try:
+            strategies = self._load_all_strategies()
+            return {"status": "ok", "data": strategies}
+        except Exception as e:
+            logger.error(f"Failed to list strategies: {e}")
+            return {"status": "error", "message": f"List failed: {str(e)}"}
+
+    def _handle_delete_strategy(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """Delete a saved strategy by name."""
+        name = req.get("name", "").strip()
+        if not name:
+            return {"status": "error", "message": "missing strategy name parameter"}
+
+        file_path = self._get_strategy_path(name)
+        if not file_path.exists():
+            return {"status": "error", "message": f"Strategy '{name}' not found"}
+
+        try:
+            file_path.unlink()
+            return {"status": "ok", "message": f"Strategy '{name}' deleted"}
+        except OSError as e:
+            logger.error(f"Failed to delete strategy '{name}': {e}")
+            return {"status": "error", "message": f"Delete failed: {str(e)}"}
+
     def _handle_list_providers(self, req: Dict[str, Any]) -> Dict[str, Any]:
         """列出所有已注册的数据源插件"""
         from src.data_provider.plugin import ProviderRegistry
@@ -1145,6 +1278,50 @@ class DataService:
                 for p in providers
             ],
         }
+
+    def _handle_get_theme(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """Get current theme and color palette."""
+        from src.shared.theme import get_current_theme
+        config = get_config()
+        return {
+            "status": "ok",
+            "data": {
+                "theme": config.theme,
+                "colors": get_current_theme(),
+            },
+        }
+
+    def _handle_set_theme(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """Set theme at runtime ('dark' or 'light')."""
+        theme_name = req.get("theme", "dark")
+        if theme_name not in ("dark", "light"):
+            return {"status": "error", "message": "theme must be 'dark' or 'light'"}
+        config = get_config()
+        config.theme = theme_name
+        config.save_json_config({"theme": theme_name})
+        return {"status": "ok", "message": f"主题已切换为 {theme_name}", "theme": theme_name}
+
+    def _handle_get_languages(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """Get available languages and current language."""
+        from src.shared.i18n import get_available_languages, get_current_lang
+        return {
+            "status": "ok",
+            "data": {
+                "available": get_available_languages(),
+                "current": get_current_lang(),
+            },
+        }
+
+    def _handle_set_language(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """Set current language at runtime."""
+        from src.shared.i18n import TRANSLATIONS, get_available_languages
+        lang = req.get("language", "zh")
+        if lang not in TRANSLATIONS:
+            return {"status": "error", "message": f"不支持的语言: {lang}"}
+        config = get_config()
+        config.language = lang
+        config.save_json_config({"language": lang})
+        return {"status": "ok", "message": f"语言已切换为 {get_available_languages()[lang]}"}
 
     def _load_plugins(self):
         """根据配置加载外部数据源插件"""

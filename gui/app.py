@@ -77,6 +77,10 @@ class StockApp:
                     icon=ft.Icons.DESCRIPTION,
                     label=_("logs")
                 ),
+                ft.NavigationRailDestination(
+                    icon=ft.Icons.STRATEGY,
+                    label=_("strategies")
+                ),
             ],
             on_change=self._on_nav_change,
         )
@@ -159,7 +163,7 @@ class StockApp:
         self._update_status_bar()
 
         # Reload current page with new theme
-        page_names = ["chart", "markets", "analyze", "tasks", "config", "logs"]
+        page_names = ["chart", "markets", "analyze", "tasks", "config", "logs", "strategies"]
         current_page = page_names[self.nav_index] if self.nav_index < len(page_names) else "markets"
         self._load_page(current_page)
 
@@ -185,7 +189,7 @@ class StockApp:
 
     def _on_nav_change(self, e):
         """Handle navigation rail selection change"""
-        page_names = ["chart", "markets", "analyze", "tasks", "config", "logs"]
+        page_names = ["chart", "markets", "analyze", "tasks", "config", "logs", "strategies"]
         self.nav_index = e.control.selected_index
         self._load_page(page_names[self.nav_index])
 
@@ -200,6 +204,7 @@ class StockApp:
             "tasks": "gui.pages.tasks",
             "config": "gui.pages.config",
             "logs": "gui.pages.logs",
+            "strategies": "gui.pages.strategies",
         }
         class_map = {
             "chart": "ChartPage",
@@ -208,6 +213,7 @@ class StockApp:
             "tasks": "TasksPage",
             "config": "ConfigPage",
             "logs": "LogsPage",
+            "strategies": "StrategiesPage",
         }
 
         if page_name not in page_map:

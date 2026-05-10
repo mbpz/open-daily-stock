@@ -136,9 +136,8 @@ stdio JSON    stdio JSON
 - [x] **P2-1: 快捷键配置化** ✅
   - 嵌套 section (global/markets/analysis/tasks)，向后兼容旧平面格式，15 tests
 
-- [ ] **P2-2: 主题切换**（深/浅色）
-
-- [ ] **P2-3: 多语言扩展**（日语、韩语）
+- [x] **P2-2: 主题切换** ✅ — 深色/浅色热切换，TUI + GUI 支持
+- [x] **P2-3: 多语言扩展** ✅ — ja_JP/ko_KR 翻译完成 (196 keys, 7 tests)
 
 ### 功能增强 P3（竞品分析驱动）
 
@@ -164,9 +163,9 @@ stdio JSON    stdio JSON
 - [x] **P4-1: 画线工具** ✅ — K线图支持斐波那契回撤 + 支撑压力位，23 tests
 - [x] **P4-2: 模拟交易** ✅ — 100万虚拟账户，5 个 DataService actions，26 tests
 - [x] **P4-3: 财务报表** ✅ — 利润表/资产负债表/现金流量表 + 关键指标，28 tests
-- [ ] **P4-4: Sparkline 迷你图** — Markets 每行行情显示1日迷你趋势线
-- [ ] **P4-5: 策略平台/社区** — 回测策略导入/导出 + GitHub open-daily-stock-strategies 仓库
-- [ ] **P4-6: data_provider 插件架构** — 付费数据源 Wind/东方财富 Data 可选接入
+- [x] **P4-4: Sparkline 迷你图** ✅ — Markets 每行行情显示1日迷你趋势线，18 tests
+- [x] **P4-5: 策略平台/社区** ✅ — 策略导入/导出/管理 GUI+TUI+STRATEGIES.md，30 tests
+- [x] **P4-6: data_provider 插件架构** ✅ — 付费数据源 Wind/东方财富 Data 可选接入
 - [x] **P4-7: CN 因子 AI prompts** ✅ — A股专用分析模板（机构流向/行业轮动/宏观信号），20 tests
 - [ ] **P4-8: 微信小程序/移动伴侣** — 微信小程序镜像通知视图 + 轻量查看页面
 
@@ -289,4 +288,4 @@ open-daily-stock/
 
 ---
 
-*最后更新: 2026-05-10 — P0-1~3/P1-1~7/P2-1/P3-1~11/P4-1~4/P4-6~7 完成, P2-2~3/P4-5/P4-8 待实现*
+*最后更新: 2026-05-10 — P0-P3 全部完成, P4 仅剩 P4-8 (微信小程序) 待实现*
