@@ -97,6 +97,8 @@ class DataService:
             "get_drawing_data": "_handle_get_drawing_data",
             "get_financials": "_handle_get_financials",
             "get_key_metrics": "_handle_get_key_metrics",
+            "get_market_overview": "_handle_get_market_overview",
+            "get_market_review": "_handle_get_market_review",
             "quit": "_handle_quit",
             "sim_buy": "_handle_sim_buy",
             "sim_sell": "_handle_sim_sell",
@@ -1605,6 +1607,58 @@ class DataService:
         except Exception as e:
             logger.error(f"获取关键指标失败 [{code}]: {e}")
             return {"status": "error", "message": f"获取关键指标失败: {str(e)}"}
+
+    # ============================================================
+    # P6-4: Market Review & Overview
+    # ============================================================
+
+    def _handle_get_market_overview(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """Get current market overview (indices, sectors, breadth)."""
+        try:
+            from src.market_analyzer import MarketAnalyzer
+            analyzer = MarketAnalyzer(search_service=None, analyzer=None)
+            overview = analyzer.get_market_overview()
+            return {
+                "status": "ok",
+                "data": {
+                    "date": overview.date,
+                    "indices": [
+                        {"name": i.name, "change": i.change, "pct_chg": i.pct_chg}
+                        for i in overview.indices
+                    ] if overview.indices else [],
+                    "total_stocks": overview.total_stocks,
+                    "up_count": overview.up_count,
+                    "down_count": overview.down_count,
+                    "hot_sectors": [
+                        {"name": s.name, "pct_chg": s.pct_chg}
+                        for s in (overview.hot_sectors or [])
+                    ],
+                    "cold_sectors": [
+                        {"name": s.name, "pct_chg": s.pct_chg}
+                        for s in (overview.cold_sectors or [])
+                    ],
+                }
+            }
+        except Exception as e:
+            logger.error(f"获取市场概览失败: {e}")
+            return {"status": "error", "message": str(e)}
+
+    def _handle_get_market_review(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate end-of-day market review report."""
+        try:
+            from src.market_analyzer import MarketAnalyzer
+            analyzer = MarketAnalyzer(search_service=None, analyzer=None)
+            from src.analyzer import GeminiAnalyzer
+            gemini = GeminiAnalyzer()
+            analyzer_with_ai = MarketAnalyzer(
+                search_service=analyzer.search_service,
+                analyzer=gemini if gemini.is_available() else None,
+            )
+            report = analyzer_with_ai.run_market_review()
+            return {"status": "ok", "report": report}
+        except Exception as e:
+            logger.error(f"生成市场复盘报告失败: {e}")
+            return {"status": "error", "message": str(e)}
 
     # === Existing Helper Methods ===
 
