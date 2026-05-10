@@ -1,4 +1,5 @@
 """DataService 后端守护进程"""
+from __future__ import annotations
 import json
 import sys
 import logging
@@ -15,7 +16,7 @@ from .config import get_config
 from .alert_service import AlertService
 from .storage import get_db, get_market_cache
 from .sim_trading import SimAccount
-from .financials import FinancialDataFetcher
+from .financials import FinancialDataFetcher, _safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -1039,7 +1040,7 @@ class DataService:
 
                 if col_name is not None:
                     values = df[col_name].tolist()[-8:]
-                    values = [self._safe_float(v) for v in values]
+                    values = [_safe_float(v) for v in values]
                     items.append({"name": chinese_name, "values": values})
 
             return {"status": "ok", "data": {
@@ -1075,16 +1076,6 @@ class DataService:
         except Exception as e:
             logger.error(f"获取关键指标失败 [{code}]: {e}")
             return {"status": "error", "message": f"获取关键指标失败: {str(e)}"}
-
-    @staticmethod
-    def _safe_float(value):
-        """安全转换为 float"""
-        if value is None:
-            return 0.0
-        try:
-            return float(value)
-        except (ValueError, TypeError):
-            return 0.0
 
     # === Existing Helper Methods ===
 
@@ -1630,6 +1621,8 @@ class DataService:
             logger.info(f"WebSocket client connected (total: {len(connected)})")
             try:
                 async for raw_message in websocket:
+                    if not self._running:
+                        break
                     try:
                         req = json.loads(raw_message)
                     except json.JSONDecodeError:

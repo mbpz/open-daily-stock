@@ -22,16 +22,40 @@ open-daily-stock 是一款面向个人投资者的本地股票分析工具，集
 
 ## 竞品对比
 
-| 产品 | 价格 | 本地优先 | TUI | GUI | AI分析 | A股 | 开源 |
-|------|:----:|:--------:|:---:|:---:|:------:|:---:|:----:|
-| **open-daily-stock** | 免费 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 雪球 | 免费/付费 | ❌ | ❌ | ✅ | 基础 | ✅ | ❌ |
-| 同花顺 | 免费/付费 | ❌ | ✅ | ✅ | 基础 | ✅ | ❌ |
-| 富途牛牛 | ¥180/年 | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| TradingView | $15/月 | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| Backtrader | 免费 | ✅ | ✅ | ❌ | ❌ | 有限 | ✅ |
+| 产品 | Stars | 价格 | 本地优先 | TUI+GUI | AI分析 | 策略Agent | 画线 | 机构 | 模拟 |
+|------|:-----:|:----:|:--------:|:-------:|:------:|:---------:|:----:|:----:|:----:|
+| **open-daily-stock** | — | 免费 | ✅ | ✅ 双模 | ✅ | ❌ | ✅ | ✅ | ✅ |
+| [daily_stock_analysis](https://github.com/ZhuLinsen/daily_stock_analysis) | 34K | 免费 | ❌(GH Actions) | ❌ Web | ✅ 8+模型 | ✅ 11种 | ❌ | ❌ | ❌ |
+| 雪球 | — | 免费/付费 | ❌ | ❌ | 基础 | ❌ | ❌ | ✅ | ❌ |
+| 同花顺 | — | 免费/付费 | ❌ | ❌ | 基础 | ❌ | ✅ | ✅ | ❌ |
+| [AI-Kline](https://github.com/QuantMLResearch/AI-Kline) | 325 | 免费 | ✅ | ❌ CMD+Web | ✅ | ❌ | ❌ | ❌ | ❌ |
+| [crewai_stock](https://github.com/liangdabiao/crewai_stock_analysis_system) | 163 | 免费 | ✅ | ❌ Web | ✅ | ✅ 多Agent | ❌ | ❌ | ❌ |
+| TradingView | — | $15/月 | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
 
-**open-daily-stock 独占优势:** 本地优先 + 开源 + TUI/GUI双模式 + AI分析 + A股覆盖
+**open-daily-stock vs daily_stock_analysis（核心差异）:**
+| 维度 | open-daily-stock | daily_stock_analysis |
+|------|:---:|:---:|
+| 代码规模 | 26 actions | 全功能Web平台 |
+| 独有功能 | TUI、画线、机构追踪、模拟交易 | Agent问股、策略系统、市场复盘 |
+| 部署 | PyInstaller双击运行 | GitHub Actions/Fork即用 |
+| 隐私 | 数据100%不离开本机 | 依赖GitHub Secrets/云端API |
+| 适合 | 技术用户+普通用户 | 有GitHub账号的技术用户 |
+
+**定位互补：开源AI股票分析的"双雄"**
+
+### PC 客户端竞品对比
+
+| 维度 | open-daily-stock | [vnpy](https://github.com/vnpy/vnpy) 40K★ | [freqtrade](https://github.com/freqtrade/freqtrade) 50K★ |
+|------|:---:|:---:|:---:|
+| GUI | **Flet+Textual 双模** | Qt (PySide6) | Web (React) |
+| 打包 | **PyInstaller 双击运行** | pip install | Docker |
+| 插件架构 | 规划中 | ✅ Gateway | ✅ Plugins |
+| 实盘交易 | ❌ | ✅ | ✅(crypto) |
+| 回测 | MA交叉 | CTA完整 | ✅完整 |
+| AI | **LLM 决策** | ML 因子 | FreqAI ML |
+| 独有 |画线/机构/模拟| CTA/套利/做市 |超参优化/策略|
+
+**open-daily-stock 独占:** TUI+GUI双模式 + 画线工具 + 机构追踪 + 模拟交易，所有竞品均无此组合
 
 ## 快速开始
 

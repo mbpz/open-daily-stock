@@ -170,6 +170,38 @@ stdio JSON    stdio JSON
 
 ---
 
+## 三（续）．竞品分析第五轮 P5（2026 生态演进）
+
+*基于 3 个并行 agent 研究：GitHub 最新项目 / AI-LLM 金融模式 / 桌面 UX 分发策略*
+
+### 即时优先（低工作量高影响）
+
+- [ ] **P5-1: Streaming LLM 响应** — token-by-token 流式输出，感知延迟 8s→1s
+- [ ] **P5-2: MCP Server Bridge** — 26 个 action 包装为 MCP Tool，AI Agent 可直接调用
+- [ ] **P5-3: Homebrew + winget 分发** — `brew install` / `winget install` 触达 10x 用户
+- [ ] **P5-4: Demo Data 免配置体验** — 首次启动提供示例数据，无需 API key 即可体验
+
+### 中期增强
+
+- [ ] **P5-5: Deep Analysis 多 Agent 模式** — 3 并行 specialist agent (技术面/基本面/新闻) + 1 合成 agent
+- [ ] **P5-6: RAG 知识库** — SQLite FTS5 全文索引历史分析，增量增强 LLM 上下文
+- [ ] **P5-7: Command Palette 命令面板** — Ctrl+K 模糊搜索所有 action，统一 TUI/GUI 入口
+
+### 长期探索
+
+- [ ] **P5-8: In-App 通知中心** — 本地 Toast + 通知历史面板
+- [ ] **P5-9: Agentic Research Mode** — LLM 自主决策调用 tools 做多步研究
+- [ ] **P5-10: 因子分析引擎** — Alpha 发现、IC/IR 分析、因子衰减监控
+
+### 非目标
+
+- ❌ Docker 部署 — 与本地优先矛盾
+- ❌ Pine Script 兼容 — 维护成本高
+- ❌ Rust 性能层 — 日线数据 Python 足够
+- ❌ 直播券商 API — 法律风险
+
+---
+
 ## 四、DataService Action 清单（P0-1 成果）
 
 当前注册 26 个 action：
@@ -287,4 +319,87 @@ open-daily-stock/
 
 ---
 
-*最后更新: 2026-05-10 — P0-P4 全部完成*
+## 八、GitHub 竞品深度分析 (2026-05-10)
+
+### 8.1 核心发现
+
+基于 GitHub API 搜索 30+ 个同类项目，识别出唯一直接竞品：**ZhuLinsen/daily_stock_analysis** (34,890 stars)。
+
+### 8.2 竞品对比矩阵
+
+| 维度 | open-daily-stock | daily_stock_analysis | AI-Kline | crewai_stock |
+|------|:---:|:---:|:---:|:---:|
+| Stars | — | 34,890 | 325 | 163 |
+| UI | TUI+GUI | Streamlit Web | CMD+Web+MCP | Streamlit |
+| AI模型 | 2 | 8+ | 2 | CrewAI Agents |
+| 策略系统 | MA交叉 | 11种(缠论/波浪/...) | LSTM预测 | 多Agent |
+| Agent对话 | ❌ | ✅ 多轮策略问答 | ❌ | ✅ 多Agent |
+| 部署 | PyInstaller | GH Actions/Docker/API | CLI | Streamlit |
+| MCP协议 | ❌ | ❌ | ✅ | ❌ |
+| Web UI | ❌ | ✅ Streamlit | ✅ | ✅ Streamlit |
+| 画线工具 | ✅ | ❌ | ❌ | ❌ |
+| 机构追踪 | ✅ | ❌ | ❌ | ❌ |
+| 模拟交易 | ✅ | ❌ | ❌ | ❌ |
+| 隐私(纯本地) | ✅ | ❌(GH Actions) | ✅ | ❌ |
+
+### 8.3 独占优势
+
+> open-daily-stock = 唯一提供 **TUI+GUI双模式 + 本地打包 + 画线工具 + 机构追踪 + 模拟交易** 的开源股票分析工具
+
+### 8.4 新增任务 (P5 - GitHub竞品驱动)
+
+- [ ] **P5-1: AI 模型扩展** — 支持 Claude/DeepSeek/通义千问/Ollama（参考 daily_stock_analysis）
+- [ ] **P5-2: Streamlit Web UI** — 添加第三种界面入口 `python main.py --web`
+- [ ] **P5-3: MCP 协议支持** — Model Context Protocol Server，Claude Code 直接调用分析（参考 AI-Kline）
+- [ ] **P5-4: Agent 多轮策略对话** — 技术面/基本面/新闻/风险多Agent协作
+- [ ] **P5-5: 策略系统扩展** — 10+种内置策略（均线/缠论/波浪/情绪周期/Regime）
+- [ ] **P5-6: FastAPI 服务模式** — HTTP REST API 替代纯 stdio JSON
+- [ ] **P5-7: Docker 部署支持** — Dockerfile + docker-compose
+- [ ] **P5-8: 市场每日复盘** — 自动生成市场概览/涨跌统计/板块强弱
+- [ ] **P5-9: GitHub Actions 定时模板** — Fork即用的零成本自动化部署
+- [ ] **P5-10: 多语言 README** — English + 繁體中文版本
+
+### 8.5 优先实施路线
+
+```
+本周: P5-1(AI模型扩展) + P5-2(Web UI) + P5-3(MCP协议)
+2周:  P5-6(FastAPI) + P5-7(Docker) + P5-4(Agent对话)
+1月:  P5-5(策略系统) + P5-8(市场复盘)
+持续: P5-9(GH Actions) + P5-10(多语言文档)
+```
+
+---
+---
+
+## 九、PC 客户端竞品分析 (2026-05-10)
+
+### 9.1 核心发现
+
+对比 vnpy(40K★)/freqtrade(50K★)/QUANTAXIS(10K★)/backtrader(21K★) 四大PC客户端项目：
+
+| 维度 | open-daily-stock | vnpy | freqtrade | backtrader |
+|------|:---:|:---:|:---:|:---:|
+| GUI | Flet+Textual 双模 | Qt (PySide6) | Web (React) | CLI only |
+| 打包 | PyInstaller | pip install | Docker | pip |
+| 插件架构 | ❌ | ✅ Gateway | ✅ Plugins | 数据源 |
+| 事件驱动 | ❌ | ✅ EventBus | ❌ | ❌ |
+| 实盘交易 | ❌ | ✅ | ✅(crypto) | ❌ |
+| 回测 | MA 基础 | ✅ CTA | ✅ 完整 | ✅ 完整 |
+| 实时图表 | mplfinance | pyqtgraph | Web | ❌ |
+| 策略系统 | ❌ | CTA/套利/做市 | Python 策略类 | Strategy 类 |
+| AI | LLM 决策 | ML 因子 | FreqAI ML | ❌ |
+| 测试数 | ~300 | ~1000 | ~2000 | ~1500 |
+
+### 9.2 新增任务 (P6 - PC客户端竞品驱动)
+
+- [ ] **P6-1: Gateway 插件架构** — 数据源/通知渠道/AI模型统一可插拔接口（借鉴 vnpy）
+- [ ] **P6-2: EventBus 事件驱动** — 替代硬编码 handler，模块异步解耦（借鉴 vnpy）
+- [ ] **P6-3: 策略系统升级** — 策略基类+参数化+超参优化（借鉴 freqtrade backtrader）
+- [ ] **P6-4: 实时图表引擎** — GUI模式下 pyqtgraph 实时K线（借鉴 vnpy）
+- [ ] **P6-5: RPC 远程服务** — DataService `--rpc` 模式 + REST + WebSocket（借鉴 freqtrade）
+- [ ] **P6-6: Docker 官方镜像** — Dockerfile + docker-compose + Docker Hub（借鉴 freqtrade）
+- [ ] **P6-7: 测试体系建设** — 目标 500+ tests，覆盖率 > 80%（借鉴 freqtrade）
+- [ ] **P6-8: 策略社区** — 策略导入/导出 + GitHub 社区仓库（借鉴 freqtrade）
+
+---
+*最后更新: 2026-05-10 — P0-P4 全部完成, P5/P6 新增*

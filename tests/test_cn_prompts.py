@@ -136,9 +136,9 @@ class TestVerdictBadge:
         assert result["score"] == 3
 
     def test_verdict_badge_confidence_default(self):
-        """Confidence defaults to 70."""
+        """Confidence is at least 50 (dynamic based on keyword count)."""
         result = CNPromptBuilder.build_verdict_badge({"output": "any text"})
-        assert result["confidence"] == 70
+        assert result["confidence"] >= 50
 
 
 class TestSummaryBulletpoints:

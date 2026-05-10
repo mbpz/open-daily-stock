@@ -1,33 +1,16 @@
-import os
-import json
-from pathlib import Path
+"""i18n compatibility shim — delegates to src.shared.i18n."""
+from src.shared.i18n import t as _, get_current_lang, get_available_languages, TRANSLATIONS, DEFAULT_LANG, _normalize_lang
 
-_translations = {}
-_current_lang = "zh_CN"
 
-def init_i18n():
-    global _current_lang
-    lang = os.getenv("LANG", "zh_CN")
-    if "en" in lang:
-        _current_lang = "en_US"
-    else:
-        _current_lang = "zh_CN"
+def set_language(lang: str) -> None:
+    """Set current language, persisting to config.
 
-    # Load translations
-    locales_dir = Path(__file__).parent.parent / "locales"
-    for lang_file in locales_dir.glob("*.json"):
-        with open(lang_file) as f:
-            _translations[lang_file.stem] = json.load(f)
-
-def _(key: str) -> str:
-    """Translate a key"""
-    return _translations.get(_current_lang, {}).get(key, key)
-
-def set_language(lang: str):
-    """Set current language"""
-    global _current_lang
-    if lang in _translations:
-        _current_lang = lang
-
-# Initialize on import
-init_i18n()
+    Accepts both 'zh_CN' (old format) and 'zh' (new format).
+    """
+    lang = _normalize_lang(lang)
+    try:
+        from src.config import get_config
+        config = get_config()
+        config.language = lang
+    except Exception:
+        pass  # Config unavailable; language is set only for this session

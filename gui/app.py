@@ -1,7 +1,10 @@
 """Flet GUI 应用主类"""
 import sys
 import importlib
+import logging
 import flet as ft
+
+logger = logging.getLogger(__name__)
 
 from gui.theme import get_theme, set_theme as apply_theme, get_current_theme_name
 from src.i18n import _
@@ -149,8 +152,8 @@ class StockApp:
             if mod_name.startswith("gui.pages."):
                 try:
                     importlib.reload(sys.modules[mod_name])
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to reload module {mod_name}: {e}")
 
         # Update page background
         self.page.bgcolor = theme["PRIMARY_COLOR"]

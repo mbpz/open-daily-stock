@@ -226,6 +226,8 @@ def add_indicators(df: pd.DataFrame, indicator_names: List[str]) -> pd.DataFrame
             df["WR"] = calculate_wr(df)
         elif name_lower == "obv":
             df["OBV"] = calculate_obv(df)
+        else:
+            logger.warning(f"Unknown indicator: {name}")
 
     return df
 
@@ -307,6 +309,8 @@ def create_kline_chart(
                 all_plots.append(mpf.make_addplot(df["WR"], panel=1, ylabel="WR", y_on_right=True, color="orange", width=1.0))
             elif ind_lower == "obv":
                 all_plots.append(mpf.make_addplot(df["OBV"], panel=1, ylabel="OBV", y_on_right=True, color="brown", width=1.0))
+            else:
+                logger.warning(f"Unknown indicator: {ind_name}")
 
     # 支撑/阻力位叠加
     if draw_sr:

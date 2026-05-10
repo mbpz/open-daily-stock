@@ -137,7 +137,14 @@ class CNPromptBuilder:
         stars = re.search(r"(\d)[\s★]?星", str(result))
         score = int(stars.group(1)) if stars else 3
 
-        return {"verdict": verdict, "score": score, "confidence": 70}
+        # Count bullish/bearish signals for confidence
+        text_lower = str(result).lower()
+        bullish_count = sum(1 for w in ["看涨", "买入", "bullish", "上涨", "利好", "增持"] if w in text_lower)
+        bearish_count = sum(1 for w in ["看跌", "卖出", "bearish", "下跌", "利空", "减持"] if w in text_lower)
+        total_signals = max(bullish_count + bearish_count, 1)
+        confidence = min(95, 50 + (total_signals * 10))
+
+        return {"verdict": verdict, "score": score, "confidence": confidence}
 
     @staticmethod
     def build_summary_bulletpoints(result_text: str) -> list:

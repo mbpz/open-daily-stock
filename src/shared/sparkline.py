@@ -12,7 +12,12 @@ def generate_sparkline(values: List[float], width: int = 8) -> str:
         width: Number of characters in the sparkline
 
     Returns:
-        String of Unicode block characters representing the trend
+        String of Unicode block characters representing the trend.
+        Returns empty string ("") if values has fewer than 2 elements,
+        indicating insufficient data to render a meaningful sparkline.
+        Callers should handle the empty-string case; use
+        generate_sparkline_with_color() for a combined (sparkline, color) result
+        that already returns ("", "grey") for insufficient data.
     """
     if not values or len(values) < 2:
         return ""

@@ -76,7 +76,7 @@ def _cluster_levels(levels: List[float], threshold: float) -> List[float]:
     clusters = []
     current_cluster = [sorted_levels[0]]
     for level in sorted_levels[1:]:
-        if abs(level - current_cluster[-1]) / current_cluster[-1] < threshold:
+        if current_cluster[-1] == 0 or abs(level - current_cluster[-1]) / current_cluster[-1] < threshold:
             current_cluster.append(level)
         else:
             clusters.append(round(float(np.mean(current_cluster)), 2))

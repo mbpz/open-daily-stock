@@ -1,4 +1,5 @@
 """Simulated trading with virtual 1,000,000 CNY account."""
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, date
 from typing import Dict, List, Optional
@@ -67,6 +68,7 @@ class SimAccount:
     positions: Dict[str, SimPosition] = field(default_factory=dict)
     trade_history: List[Dict] = field(default_factory=list)
     total_commission: float = 0.0
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     @property
     def total_assets(self) -> float:
@@ -82,70 +84,73 @@ class SimAccount:
 
     def buy(self, code: str, name: str, price: float, shares: int = 100) -> Dict:
         """Buy stock. Returns result dict."""
-        cost = price * shares
-        commission = max(cost * 0.00025, 5.0)  # min commission ¥5
-        total_cost = cost + commission
+        with self._lock:
+            cost = price * shares
+            commission = max(cost * 0.00025, 5.0)  # min commission ¥5
+            total_cost = cost + commission
 
-        if total_cost > self.cash:
-            return {"status": "error", "message": f"资金不足，需要 ¥{total_cost:.2f}，可用 ¥{self.cash:.2f}"}
+            if total_cost > self.cash:
+                return {"status": "error", "message": f"资金不足，需要 ¥{total_cost:.2f}，可用 ¥{self.cash:.2f}"}
 
-        self.cash -= total_cost
-        self.total_commission += commission
+            self.cash -= total_cost
+            self.total_commission += commission
 
-        if code in self.positions:
-            # Average up/down
-            pos = self.positions[code]
-            total_shares = pos.shares + shares
-            pos.buy_price = (pos.cost + cost) / total_shares
-            pos.shares = total_shares
-        else:
-            self.positions[code] = SimPosition(
-                code=code, name=name, shares=shares,
-                buy_price=price, buy_date=date.today().isoformat(),
-                current_price=price
-            )
+            if code in self.positions:
+                # Average up/down
+                pos = self.positions[code]
+                total_shares = pos.shares + shares
+                pos.buy_price = (pos.cost + cost) / total_shares
+                pos.shares = total_shares
+            else:
+                self.positions[code] = SimPosition(
+                    code=code, name=name, shares=shares,
+                    buy_price=price, buy_date=date.today().isoformat(),
+                    current_price=price
+                )
 
-        trade = {"action": "buy", "code": code, "name": name, "price": price,
-                 "shares": shares, "cost": total_cost, "time": datetime.now().isoformat()}
-        self.trade_history.append(trade)
-        return {"status": "ok", "message": f"买入 {name} {shares}股 @{price:.2f}", "trade": trade}
+            trade = {"action": "buy", "code": code, "name": name, "price": price,
+                     "shares": shares, "cost": total_cost, "time": datetime.now().isoformat()}
+            self.trade_history.append(trade)
+            return {"status": "ok", "message": f"买入 {name} {shares}股 @{price:.2f}", "trade": trade}
 
     def sell(self, code: str, price: float, shares: Optional[int] = None) -> Dict:
         """Sell stock. If shares is None, sell all."""
-        if code not in self.positions:
-            return {"status": "error", "message": f"未持有 {code}"}
+        with self._lock:
+            if code not in self.positions:
+                return {"status": "error", "message": f"未持有 {code}"}
 
-        pos = self.positions[code]
-        sell_shares = shares or pos.shares
+            pos = self.positions[code]
+            sell_shares = shares or pos.shares
 
-        if sell_shares > pos.shares:
-            return {"status": "error", "message": f"持仓不足，持有 {pos.shares}股"}
+            if sell_shares > pos.shares:
+                return {"status": "error", "message": f"持仓不足，持有 {pos.shares}股"}
 
-        revenue = price * sell_shares
-        commission = max(revenue * 0.00025, 5.0)
-        stamp_tax = revenue * 0.001  # 印花税
-        net_revenue = revenue - commission - stamp_tax
+            revenue = price * sell_shares
+            commission = max(revenue * 0.00025, 5.0)
+            stamp_tax = revenue * 0.001  # 印花税
+            net_revenue = revenue - commission - stamp_tax
 
-        self.cash += net_revenue
-        self.total_commission += commission
+            self.cash += net_revenue
+            self.total_commission += commission
 
-        trade = {"action": "sell", "code": code, "name": pos.name, "price": price,
-                 "shares": sell_shares, "revenue": net_revenue, "pnl": (price - pos.buy_price) * sell_shares,
-                 "time": datetime.now().isoformat()}
-        self.trade_history.append(trade)
+            trade = {"action": "sell", "code": code, "name": pos.name, "price": price,
+                     "shares": sell_shares, "revenue": net_revenue, "pnl": (price - pos.buy_price) * sell_shares,
+                     "time": datetime.now().isoformat()}
+            self.trade_history.append(trade)
 
-        if sell_shares == pos.shares:
-            del self.positions[code]
-        else:
-            pos.shares -= sell_shares
+            if sell_shares == pos.shares:
+                del self.positions[code]
+            else:
+                pos.shares -= sell_shares
 
-        return {"status": "ok", "message": f"卖出 {trade['name']} {sell_shares}股 @{price:.2f}", "trade": trade}
+            return {"status": "ok", "message": f"卖出 {trade['name']} {sell_shares}股 @{price:.2f}", "trade": trade}
 
     def update_prices(self, prices: Dict[str, float]):
         """Update current prices for all positions."""
-        for code, price in prices.items():
-            if code in self.positions:
-                self.positions[code].current_price = price
+        with self._lock:
+            for code, price in prices.items():
+                if code in self.positions:
+                    self.positions[code].current_price = price
 
     def get_summary(self) -> Dict:
         return {

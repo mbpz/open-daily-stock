@@ -429,7 +429,7 @@ class TestFinancialsSafeFloat:
         assert _safe_float("abc") == 0.0
 
     def test_safe_float_data_service_still_works(self):
-        """DataService._safe_float should still work for backward compat."""
-        from src.data_service import DataService
-        assert DataService._safe_float(None) == 0.0
-        assert DataService._safe_float(123.45) == 123.45
+        """_safe_float is importable from src.financials (deduplicated from DataService)."""
+        from src.financials import _safe_float
+        assert _safe_float(None) == 0.0
+        assert _safe_float(123.45) == 123.45
