@@ -1,0 +1,14 @@
+PackageIdentifier: mbpz.open-daily-stock
+PackageVersion: 0.5.0
+PackageName: open-daily-stock
+Publisher: mbpz
+License: MIT
+ShortDescription: Local-first A-share/HK/US stock analyzer with TUI+GUI dual-mode
+InstallerType: exe
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/mbpz/open-daily-stock/releases/download/v0.5.0/open-daily-stock-setup.exe
+    InstallerSha256: <auto>
+    Scope: user
+ManifestType: singleton
+ManifestVersion: 1.0.0

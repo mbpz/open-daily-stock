@@ -10,6 +10,10 @@ class AnalyzeView(Static):
         self._on_analyze = on_analyze
         self._progress_bar = None
         self._progress_text = None
+        self._streaming = False
+        self._stream_buffer = ""
+        self._stream_dot_count = 0
+        self._stream_timer = None
 
     def compose(self):
         yield Static(_("  输入股票代码: "), id="label")
@@ -48,8 +52,122 @@ class AnalyzeView(Static):
         progress_text.update(message)
         self.refresh()
 
+    # ================================================================
+    # Streaming display methods (P5-1)
+    # ================================================================
+
+    def start_stream(self):
+        """Begin a streaming analysis display.
+
+        Clears any previous result and shows a streaming indicator ("...").
+        """
+        self._streaming = True
+        self._stream_buffer = ""
+        self._stream_dot_count = 0
+
+        # Clear structured fields
+        self.query_one("#verdict-area", Static).update("")
+        self.query_one("#sentiment-bar", Static).update("")
+        self.query_one("#catalysts-area", Static).update("")
+        self.query_one("#risks-area", Static).update("")
+
+        # Show progress bar
+        progress_bar = self.query_one("#progress-bar", ProgressBar)
+        progress_bar.visible = True
+        progress_bar.update(progress=0)
+
+        # Show streaming indicator
+        progress_text = self.query_one("#progress-text", Static)
+        progress_text.update(_("正在流式分析..."))
+
+        # Initialize result area with streaming indicator
+        result_area = self.query_one("#result-area", Static)
+        result_area.update(_("分析中") + " ...\n")
+        self.refresh()
+
+    def append_stream_chunk(self, chunk: str):
+        """Append a chunk of streaming text to the result area.
+
+        Args:
+            chunk: Partial text from the LLM streaming response
+        """
+        if not self._streaming:
+            self.start_stream()
+
+        self._stream_buffer += chunk
+
+        # Update the animated dots every ~8 chunks
+        self._stream_dot_count = (self._stream_dot_count + 1) % 8
+        dots = "." * (self._stream_dot_count % 4)
+
+        result_area = self.query_one("#result-area", Static)
+        # Show last ~2000 chars of buffer + streaming indicator
+        display = self._stream_buffer[-2000:]
+        if len(self._stream_buffer) > 2000:
+            display = "...[earlier]" + display[-1900:]
+        result_area.update(display + f"\n\n{_('分析中')}{dots}")
+        self.refresh()
+
+    def finish_stream(self, result):
+        """Complete the streaming display with the final structured result.
+
+        Args:
+            result: AnalysisResult object from the analyzer
+        """
+        self._streaming = False
+        self._stream_buffer = ""
+
+        progress_bar = self.query_one("#progress-bar", ProgressBar)
+        progress_text = self.query_one("#progress-text", Static)
+        progress_bar.visible = False
+        progress_text.update("")
+
+        # Build details text
+        details_lines = [
+            f"{_('综合评分:')}{result.sentiment_score}/100",
+            f"{_('趋势预测:')}{result.trend_prediction}",
+            f"{_('操作建议:')}{result.operation_advice}",
+            f"{_('置信度:')}{result.confidence_level}",
+            "",
+        ]
+        if result.trend_analysis:
+            details_lines.append(f"{_('走势分析:')}{result.trend_analysis}")
+        if result.analysis_summary:
+            details_lines.append(f"\n{_('综合分析:')}{result.analysis_summary}")
+        if result.risk_warning:
+            details_lines.append(f"\n{_('风险提示:')}{result.risk_warning}")
+        if result.key_points:
+            details_lines.append(f"\n{_('核心看点:')}{result.key_points}")
+
+        details = "\n".join(details_lines)
+
+        # Determine verdict
+        score = result.sentiment_score
+        if score >= 70:
+            verdict = _("看涨")
+            verdict_color = "green"
+        elif score >= 40:
+            verdict = _("中性")
+            verdict_color = "yellow"
+        else:
+            verdict = _("看跌")
+            verdict_color = "red"
+
+        # Extract catalysts and risks from dashboard if available
+        catalysts = []
+        risks = []
+        if result.dashboard:
+            catalysts = result.dashboard.get("intelligence", {}).get("positive_catalysts", [])
+            risks = result.dashboard.get("intelligence", {}).get("risk_alerts", [])
+
+        self.set_structured_result(verdict, verdict_color, score,
+                                   catalysts, risks, details)
+
     def set_result(self, text: str):
         """Set plain text result (for errors)"""
+        self._streaming = False
+        self._stream_buffer = ""
+
         progress_bar = self.query_one("#progress-bar", ProgressBar)
         progress_text = self.query_one("#progress-text", Static)
         progress_bar.visible = False
@@ -64,6 +182,9 @@ class AnalyzeView(Static):
     def set_structured_result(self, verdict: str, verdict_color: str, score: int,
                                catalysts: list, risks: list, details: str):
         """Set structured analysis result with verdict badge and sentiment bar"""
+        self._streaming = False
+        self._stream_buffer = ""
+
         progress_bar = self.query_one("#progress-bar", ProgressBar)
         progress_text = self.query_one("#progress-text", Static)
         progress_bar.visible = False

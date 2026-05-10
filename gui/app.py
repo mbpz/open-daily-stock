@@ -39,6 +39,9 @@ class StockApp:
         # Initialize ServiceClient for DataService communication
         self._client = ServiceClient()
 
+        # Pipeline reference (lazy-init; used by analyze page as fallback)
+        self._pipeline = None
+
         # Initialize task store
         self._task_store = TaskStore()
 
@@ -97,20 +100,39 @@ class StockApp:
             tooltip=theme_tooltip,
         )
 
-        # Status bar with version, theme toggle, and update button
+        # Demo mode badge (P5-4)
+        self._demo_badge = None
+        config = get_config()
+        if config.is_demo_mode():
+            self._demo_badge = ft.Container(
+                content=ft.Text("演示模式", color=ft.Colors.WHITE, size=11, weight=ft.FontWeight.BOLD),
+                bgcolor=theme["WARNING_COLOR"],
+                border_radius=4,
+                padding=ft.padding.symmetric(horizontal=8, vertical=2),
+                tooltip="配置 API key 后解锁实时 AI 分析",
+            )
+
+        # Status bar with version, theme toggle, demo badge, and update button
+        status_controls = [
+            ft.Text(f"{_('last_update')}: {self.status_text}",
+                    color=theme["TEXT_SECONDARY"], size=14),
+            ft.Container(expand=True),
+        ]
+        if self._demo_badge:
+            status_controls.append(self._demo_badge)
+            status_controls.append(ft.Container(width=8))
+        status_controls.extend([
+            self._theme_btn,
+            ft.Text(f"v{VERSION}", color=theme["TEXT_SECONDARY"], size=12),
+            ft.IconButton(
+                icon=ft.Icons.UPDATE,
+                on_click=self._check_update,
+                tooltip=_("check_update"),
+            ),
+        ])
+
         self.status_bar = ft.Container(
-            content=ft.Row([
-                ft.Text(f"{_('last_update')}: {self.status_text}",
-                        color=theme["TEXT_SECONDARY"], size=14),
-                ft.Container(expand=True),
-                self._theme_btn,
-                ft.Text(f"v{VERSION}", color=theme["TEXT_SECONDARY"], size=12),
-                ft.IconButton(
-                    icon=ft.Icons.UPDATE,
-                    on_click=self._check_update,
-                    tooltip=_("check_update"),
-                ),
-            ]),
+            content=ft.Row(status_controls),
             padding=10,
             bgcolor=theme["PRIMARY_COLOR"],
             on_click=self._install_update,
@@ -175,10 +197,15 @@ class StockApp:
     def _update_status_bar(self):
         """Update status bar to reflect current theme"""
         theme = get_theme()
-        self.status_bar.content = ft.Row([
+        status_controls = [
             ft.Text(f"{_('last_update')}: {self.status_text}",
                     color=theme["TEXT_SECONDARY"], size=14),
             ft.Container(expand=True),
+        ]
+        if self._demo_badge:
+            status_controls.append(self._demo_badge)
+            status_controls.append(ft.Container(width=8))
+        status_controls.extend([
             self._theme_btn,
             ft.Text(f"v{VERSION}", color=theme["TEXT_SECONDARY"], size=12),
             ft.IconButton(
@@ -187,6 +214,7 @@ class StockApp:
                 tooltip=_("check_update"),
             ),
         ])
+        self.status_bar.content = ft.Row(status_controls)
         self.status_bar.bgcolor = theme["PRIMARY_COLOR"]
         self.status_bar.update()
 

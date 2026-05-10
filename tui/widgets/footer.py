@@ -6,11 +6,12 @@ from src.shared.market_status import get_market_statuses
 
 class Footer(Static):
     """Bottom footer bar."""
-    def __init__(self, last_update: str = "---"):
+    def __init__(self, last_update: str = "---", demo_mode: bool = False):
         super().__init__()
         self._last_update = last_update
         self._market_status = ""
         self._theme = "dark"
+        self._demo_mode = demo_mode
 
     def set_last_update(self, ts: str):
         self._last_update = ts
@@ -27,7 +28,8 @@ class Footer(Static):
         self._update_display()
 
     def _update_display(self):
-        self.update(f"  {self._market_status}  |  最后更新: {self._last_update}  ")
+        demo_label = "  [演示模式]" if self._demo_mode else ""
+        self.update(f"  {self._market_status}  |  最后更新: {self._last_update}{demo_label}  ")
 
     def apply_theme(self, theme: str):
         """热切换主题"""

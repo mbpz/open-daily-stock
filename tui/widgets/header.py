@@ -1,11 +1,14 @@
-"""Header bar widget showing title, time, connection status."""
+"""Header bar widget showing title, time, connection status, demo mode indicator."""
 from textual.widgets import Static
 from datetime import datetime, timezone, timedelta
 from tui.styles.theme import BG_DARK, FG_PRIMARY, ACCENT_BLUE
 from tui.styles.theme import LIGHT_BG, LIGHT_FG, LIGHT_ACCENT
+from src.config import get_config
+
 
 class Header(Static):
-    """Top header bar."""
+    """Top header bar with demo mode indicator."""
+
     def __init__(self):
         super().__init__()
         self._theme = "dark"
@@ -31,4 +34,11 @@ class Header(Static):
     def _update_time(self):
         tz_cn = timezone(timedelta(hours=8))
         now = datetime.now(tz_cn).strftime("%Y-%m-%d %H:%M")
-        self.update(f"  Stock Analysis TUI    {now}    ● 在线  ")
+
+        # Check demo mode
+        config = get_config()
+        if config.is_demo_mode():
+            demo_badge = " [演示模式] "
+            self.update(f"  Stock Analysis TUI  {demo_badge}  {now}    ● 在线  ")
+        else:
+            self.update(f"  Stock Analysis TUI    {now}    ● 在线  ")

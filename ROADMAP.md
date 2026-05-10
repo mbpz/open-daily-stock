@@ -176,10 +176,10 @@ stdio JSON    stdio JSON
 
 ### 即时优先（低工作量高影响）
 
-- [ ] **P5-1: Streaming LLM 响应** — token-by-token 流式输出，感知延迟 8s→1s
-- [ ] **P5-2: MCP Server Bridge** — 26 个 action 包装为 MCP Tool，AI Agent 可直接调用
-- [ ] **P5-3: Homebrew + winget 分发** — `brew install` / `winget install` 触达 10x 用户
-- [ ] **P5-4: Demo Data 免配置体验** — 首次启动提供示例数据，无需 API key 即可体验
+- [x] **P5-1: Streaming LLM 响应** ✅ — token-by-token 流式输出，感知延迟 8s→1s，35 tests
+- [x] **P5-2: MCP Server Bridge** ✅ — 37 tools 包装为 MCP Tool，`--mcp` 模式，39 tests
+- [x] **P5-3: Homebrew + winget 分发** ✅ — `brew install` / `winget install`，CI checksums
+- [x] **P5-4: Demo Data 免配置体验** ✅ — 5 只热门股 + K线历史 + AI 样例，25 tests
 
 ### 中期增强
 

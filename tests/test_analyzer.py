@@ -247,3 +247,191 @@ class TestGeminiAnalyzer:
 
         result.confidence_level = "低"
         assert result.get_confidence_stars() == "⭐"
+
+
+class TestGeminiAnalyzerStreaming:
+    """Streaming analysis tests (P5-1)"""
+
+    def test_analyze_stream_yields_done_when_no_api_key(self):
+        """analyze_stream yields a done event with error when no API key"""
+        with patch('src.analyzer.get_config') as mock_config:
+            config = MagicMock()
+            config.gemini_api_key = None
+            config.openai_api_key = None
+            config.openai_base_url = None
+            config.openai_model = "gpt-4o-mini"
+            config.gemini_model = "gemini-2.0-flash"
+            config.gemini_model_fallback = "gemini-1.5-flash"
+            config.gemini_temperature = 0.3
+            config.gemini_max_retries = 3
+            config.gemini_retry_delay = 2.0
+            config.gemini_request_delay = 0.0
+            config.openai_temperature = 0.3
+            mock_config.return_value = config
+
+            analyzer = GeminiAnalyzer(api_key=None)
+            assert analyzer.is_available() is False
+
+            context = {"code": "600519"}
+            events = list(analyzer.analyze_stream(context))
+
+            assert len(events) == 1
+            assert events[0]["type"] == "done"
+            assert events[0]["result"].success is False
+            assert "未配置" in events[0]["result"].error_message
+
+    def test_analyze_stream_yields_chunks_and_done(self):
+        """analyze_stream yields chunks then a done event with parsed result"""
+        with patch('src.analyzer.get_config') as mock_config:
+            config = MagicMock()
+            config.gemini_api_key = "fake_key_for_testing"
+            config.openai_api_key = None
+            config.openai_base_url = None
+            config.openai_model = "gpt-4o-mini"
+            config.gemini_model = "gemini-2.0-flash"
+            config.gemini_model_fallback = "gemini-1.5-flash"
+            config.gemini_temperature = 0.3
+            config.gemini_max_retries = 3
+            config.gemini_retry_delay = 2.0
+            config.gemini_request_delay = 0.0
+            config.openai_temperature = 0.3
+            mock_config.return_value = config
+
+            with patch.object(GeminiAnalyzer, '_init_model'):
+                analyzer = GeminiAnalyzer(api_key="fake_key")
+
+                # Mock _call_gemini_stream to yield fake chunks
+                mock_chunks = [
+                    '{"sentiment_score": 75,\n',
+                    '"trend_prediction": "看多",\n',
+                    '"operation_advice": "买入",\n',
+                    '"confidence_level": "高",\n',
+                    '"analysis_summary": "测试流式摘要",',
+                    '"key_points": "流式买点",',
+                    '"risk_warning": "流式风险",',
+                    '"buy_reason": "流式理由"',
+                    '}',
+                ]
+
+                with patch.object(analyzer, '_call_gemini_stream', return_value=iter(mock_chunks)):
+                    # Mock _model to make is_available() return True
+                    analyzer._model = MagicMock()
+
+                    context = {
+                        "code": "600519",
+                        "stock_name": "贵州茅台",
+                        "date": "2026-01-09",
+                        "today": {
+                            "close": 1680.0,
+                            "open": 1670.0,
+                            "high": 1690.0,
+                            "low": 1660.0,
+                            "pct_chg": 1.5,
+                            "volume": 3500000,
+                            "ma5": 1675.0,
+                            "ma10": 1665.0,
+                            "ma20": 1650.0,
+                        }
+                    }
+
+                    events = list(analyzer.analyze_stream(context))
+
+                    # Should have 9 chunks + 1 done event
+                    assert len(events) >= 2
+                    chunk_events = [e for e in events if e["type"] == "chunk"]
+                    done_events = [e for e in events if e["type"] == "done"]
+
+                    assert len(chunk_events) == 9
+                    for ce in chunk_events:
+                        assert "data" in ce
+                        assert isinstance(ce["data"], str)
+
+                    assert len(done_events) == 1
+                    assert done_events[0]["result"].code == "600519"
+                    assert done_events[0]["result"].sentiment_score == 75
+                    assert done_events[0]["result"].trend_prediction == "看多"
+
+    def test_analyze_stream_handles_api_error(self):
+        """analyze_stream yields a done error when the API call fails"""
+        with patch('src.analyzer.get_config') as mock_config:
+            config = MagicMock()
+            config.gemini_api_key = "fake_key_for_testing"
+            config.openai_api_key = None
+            config.openai_base_url = None
+            config.openai_model = "gpt-4o-mini"
+            config.gemini_model = "gemini-2.0-flash"
+            config.gemini_model_fallback = "gemini-1.5-flash"
+            config.gemini_temperature = 0.3
+            config.gemini_max_retries = 3
+            config.gemini_retry_delay = 2.0
+            config.gemini_request_delay = 0.0
+            config.openai_temperature = 0.3
+            mock_config.return_value = config
+
+            with patch.object(GeminiAnalyzer, '_init_model'):
+                analyzer = GeminiAnalyzer(api_key="fake_key")
+
+                # Mock _call_gemini_stream to raise an error
+                with patch.object(analyzer, '_call_gemini_stream', side_effect=Exception("API rate limit")):
+                    analyzer._model = MagicMock()
+
+                    context = {"code": "600519"}
+
+                    events = list(analyzer.analyze_stream(context))
+
+                    # Should yield exactly one done event with error
+                    assert len(events) == 1
+                    assert events[0]["type"] == "done"
+                    assert events[0]["result"].success is False
+                    assert "API rate limit" in str(events[0]["result"].error_message)
+
+    def test_analyze_stream_uses_openai_fallback(self):
+        """analyze_stream should route to _call_openai_stream when _use_openai is True"""
+        with patch('src.analyzer.get_config') as mock_config:
+            config = MagicMock()
+            config.gemini_api_key = "fake_key"
+            config.openai_api_key = "fake_openai_key_for_test"
+            config.openai_base_url = "https://api.openai.com/v1"
+            config.openai_model = "gpt-4o-mini"
+            config.gemini_model = "gemini-2.0-flash"
+            config.gemini_model_fallback = "gemini-1.5-flash"
+            config.gemini_temperature = 0.3
+            config.gemini_max_retries = 3
+            config.gemini_retry_delay = 2.0
+            config.gemini_request_delay = 0.0
+            config.openai_temperature = 0.3
+            mock_config.return_value = config
+
+            with patch.object(GeminiAnalyzer, '_init_model'):
+                analyzer = GeminiAnalyzer(api_key="fake_key")
+                # Force OpenAI mode
+                analyzer._use_openai = True
+                analyzer._openai_client = MagicMock()
+                analyzer._current_model_name = "gpt-4o-mini"
+
+                # Mock _call_openai_stream to yield fake chunks
+                mock_chunks = [
+                    '{"sentiment_score": 60,',
+                    '"trend_prediction": "震荡",',
+                    '"operation_advice": "持有"',
+                    '}',
+                ]
+
+                # We need to mock _call_gemini_stream since when _use_openai=True,
+                # it delegates to _call_openai_stream
+                with patch.object(analyzer, '_call_openai_stream', return_value=iter(mock_chunks)):
+                    context = {
+                        "code": "AAPL",
+                        "stock_name": "苹果",
+                        "date": "2026-01-09",
+                    }
+
+                    events = list(analyzer.analyze_stream(context))
+
+                    chunk_events = [e for e in events if e["type"] == "chunk"]
+                    done_events = [e for e in events if e["type"] == "done"]
+
+                    assert len(chunk_events) == 4
+                    assert len(done_events) == 1
+                    assert done_events[0]["result"].code == "AAPL"
+                    assert done_events[0]["result"].trend_prediction == "震荡"

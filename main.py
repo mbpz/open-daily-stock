@@ -22,6 +22,7 @@ A股自选股智能分析系统 - 主调度程序
 - 买点偏好：缩量回踩 MA5/MA10 支撑
 """
 import os
+import re
 import sys
 import argparse
 import logging
@@ -31,6 +32,20 @@ from datetime import datetime, timezone, timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import List, Optional, TYPE_CHECKING
+
+
+def _get_version() -> str:
+    """Read version from pyproject.toml (available at module-load time)."""
+    pyproject = Path(__file__).parent / "pyproject.toml"
+    if pyproject.exists():
+        content = pyproject.read_text()
+        m = re.search(r'version\s*=\s*["\']([^"\']+)["\']', content)
+        if m:
+            return m.group(1)
+    return "0.0.0"
+
+
+__version__ = _get_version()
 
 if TYPE_CHECKING:
     from src.config import Config
@@ -67,14 +82,17 @@ LOG_FORMAT = '%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s'
 LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 
 
-def setup_logging(debug: bool = False, log_dir: str = "./logs") -> None:
+def setup_logging(debug: bool = False, log_dir: str = "./logs", console_stream=None) -> None:
     """
     配置日志系统（同时输出到控制台和文件）
-    
+
     Args:
         debug: 是否启用调试模式
         log_dir: 日志文件目录
+        console_stream: 控制台输出流（默认 sys.stdout，MCP 模式使用 sys.stderr）
     """
+    if console_stream is None:
+        console_stream = sys.stdout
     level = logging.DEBUG if debug else logging.INFO
     
     # 创建日志目录
@@ -91,7 +109,7 @@ def setup_logging(debug: bool = False, log_dir: str = "./logs") -> None:
     root_logger.setLevel(logging.DEBUG)  # 根 logger 设为 DEBUG，由 handler 控制输出级别
     
     # Handler 1: 控制台输出
-    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler = logging.StreamHandler(console_stream)
     console_handler.setLevel(level)
     console_handler.setFormatter(logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT))
     root_logger.addHandler(console_handler)
@@ -247,6 +265,25 @@ def parse_arguments() -> argparse.Namespace:
         help='Run DataService as WebSocket server (for remote clients)'
     )
 
+    parser.add_argument(
+        '--demo',
+        action='store_true',
+        help='以演示模式启动（加载示例数据，无需配置 API Key）'
+    )
+
+    parser.add_argument(
+        '--mcp',
+        action='store_true',
+        help='Run DataService in MCP (Model Context Protocol) mode over stdio'
+    )
+
+    parser.add_argument(
+        '--version',
+        action='version',
+        version=f'open-daily-stock {__version__}',
+        help='Show version and exit'
+    )
+
     return parser.parse_args()
 
 
@@ -365,10 +402,29 @@ def main() -> int:
     # 解析命令行参数
     args = parse_arguments()
 
-    # 检查是否需要引导首次配置
-    if not os.path.exists("config.json"):
+    # === 引导首次配置（P5-4: 支持演示模式）===
+    if args.demo:
+        # 命令行指定 --demo，直接进入演示模式
+        from src.config import get_config
+        from src.demo_data import apply_demo_mode, DEMO_STOCKS
+        config = get_config()
+        apply_demo_mode(config)
+        config.stock_list = [s["code"] for s in DEMO_STOCKS]
+        logger.info("演示模式已激活")
+    elif not os.path.exists("config.json"):
         from src.setup_wizard import run_wizard
-        run_wizard()
+        result = run_wizard(allow_demo=True)
+        if result == "demo":
+            logger.info("用户选择演示模式")
+
+    # === MCP 服务器模式（使用 stdin/stdout JSON-RPC）===
+    if args.mcp:
+        from src.mcp_server import MCPServer
+
+        setup_logging(debug=args.debug, log_dir="logs", console_stream=sys.stderr)
+        logger.info("模式: MCP JSON-RPC (stdio)")
+        server = MCPServer()
+        return server.run()
 
     # === WebSocket 服务器模式（在启动 DataService 子进程前处理）===
     if args.ws_server:

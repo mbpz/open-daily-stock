@@ -63,8 +63,48 @@ jobs:
           path: dist/open-daily-stock*
           retention-days: 30
 
-  release:
+  checksums:
     needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Compute SHA256 checksums
+        run: |
+          echo "## SHA256 Checksums" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          find artifacts -type f | sort | while read f; do
+            if file "$f" | grep -q "ELF\|Mach-O\|PE32"; then
+              SHA=$(sha256sum "$f" | awk '{print $1}')
+              echo "$SHA  $(basename "$f")"
+              echo "$SHA  $(basename "$f")" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Export SHA256 to env summary (Homebrew)
+        run: |
+          echo "## :beer: Homebrew Formula SHA256" >> $GITHUB_STEP_SUMMARY
+          echo "Update \`scripts/homebrew/open-daily-stock.rb\` with:" >> $GITHUB_STEP_SUMMARY
+          echo '```ruby' >> $GITHUB_STEP_SUMMARY
+          MACOS_SHA=$(sha256sum artifacts/open-daily-stock-macos-latest/open-daily-stock-macos 2>/dev/null | awk '{print $1}' || echo "PLACEHOLDER")
+          echo "sha256 \"$MACOS_SHA\"" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Export SHA256 to env summary (winget)
+        run: |
+          echo "## :window: winget Manifest SHA256" >> $GITHUB_STEP_SUMMARY
+          echo "Update \`scripts/winget/mbpz.open-daily-stock.yaml\` with:" >> $GITHUB_STEP_SUMMARY
+          echo '```yaml' >> $GITHUB_STEP_SUMMARY
+          WIN_SHA=$(sha256sum artifacts/open-daily-stock-windows-latest/open-daily-stock.exe 2>/dev/null | awk '{print $1}' || echo "PLACEHOLDER")
+          echo "InstallerSha256: $WIN_SHA" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  release:
+    needs: [build, checksums]
     runs-on: ubuntu-latest
     permissions:
       contents: write

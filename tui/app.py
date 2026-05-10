@@ -199,6 +199,10 @@ class TUIApp(App):
     def __init__(self, on_analyze_callback=None):
         config = get_config()
 
+        # Support --demo CLI flag to enter demo mode (P5-4)
+        if "--demo" in sys.argv:
+            config.set_demo_mode(enabled=True)
+
         # 从配置构建动态按键绑定（向后兼容：缺失时使用默认值）
         kb = config.keybindings if config.keybindings else _DEFAULT_KEYBINDINGS
 
@@ -254,9 +258,10 @@ class TUIApp(App):
             yield WizardView(on_complete_callback=on_wizard_complete, on_skip_callback=on_wizard_skip)
             return
 
+        config = get_config()
         yield Header()
         yield Nav(active=0)
-        yield Footer(last_update="---")
+        yield Footer(last_update="---", demo_mode=config.is_demo_mode())
         yield MarketsView(self._dp)
         yield TasksView(self._task_store)
         yield AnalyzeView(self._on_analyze_callback)
@@ -376,14 +381,63 @@ class TUIApp(App):
         self.query_one(HelpPanel).display = False
 
     async def _run_analysis_with_progress(self, stock_code: str, progress_callback):
-        """Run analysis with progress reporting."""
+        """Run analysis with streaming when WebSocket is available.
+
+        P5-1: Tries streaming via WsClient -> DataService WebSocket first.
+        Falls back to the blocking pipeline (stdio) if WebSocket is unavailable.
+        """
+        from tui.widgets.analyze import AnalyzeView
+        import logging
+        _log = logging.getLogger(__name__)
+
+        analyze_view = self.query_one(AnalyzeView)
+
+        # === Primary path: WebSocket streaming (P5-1) ===
+        try:
+            from src.ws_client import WsClient
+            ws = WsClient()
+            await ws.connect()
+            _log.info(f"Streaming analysis via WebSocket for {stock_code}")
+
+            analyze_view.start_stream()
+            if progress_callback:
+                progress_callback("stream_start", 10, _("正在流式分析..."))
+
+            async for event in ws.analyze_stream(stock_code):
+                etype = event.get("type")
+                if etype == "stream_chunk":
+                    analyze_view.append_stream_chunk(event.get("chunk", ""))
+                elif etype == "stream_done":
+                    result_data = event.get("result", {})
+                    # Build an AnalysisResult from the dict returned by WS
+                    from src.analyzer import AnalysisResult
+                    result = AnalysisResult(**result_data) if result_data else None
+                    if result:
+                        analyze_view.finish_stream(result)
+                        if progress_callback:
+                            progress_callback("analysis_completed", 100, _("分析完成"))
+                    await ws.close()
+                    return
+                elif etype == "stream_error":
+                    _log.warning(f"Stream error for {stock_code}: {event.get('message')}")
+                    break
+
+            await ws.close()
+        except Exception as e:
+            _log.info(f"WebSocket streaming unavailable ({e}), falling back to pipeline")
+
+        # === Fallback: blocking pipeline via stdio ===
         from src.core.pipeline import StockAnalysisPipeline
         try:
             pipeline = StockAnalysisPipeline(progress_callback=progress_callback)
             result = await asyncio.to_thread(pipeline.process_single_stock, stock_code)
             if result:
-                progress_callback("analysis_completed", 100, _("分析完成"))
+                analyze_view.finish_stream(result)
+                if progress_callback:
+                    progress_callback("analysis_completed", 100, _("分析完成"))
             else:
-                progress_callback("analysis_failed", 100, _("分析失败"))
+                if progress_callback:
+                    progress_callback("analysis_failed", 100, _("分析失败"))
         except Exception as e:
-            progress_callback("analysis_error", 100, f"{_('错误: ')}{e}")
+            if progress_callback:
+                progress_callback("analysis_error", 100, f"{_('错误: ')}{e}")

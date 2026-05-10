@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import logging
+import asyncio
 import threading
 import uuid
 import time
@@ -72,6 +73,7 @@ class DataService:
             "get_markets": "_handle_get_markets",
             "refresh": "_handle_refresh",
             "analyze": "_handle_analyze",
+            "analyze_stream": "_handle_analyze_stream",
             "get_history": "_handle_get_history",
             "search_news": "_handle_search_news",
             "get_kline_data": "_handle_get_kline_data",
@@ -110,6 +112,8 @@ class DataService:
             "set_theme": "_handle_set_theme",
             "get_languages": "_handle_get_languages",
             "set_language": "_handle_set_language",
+            "get_config": "_handle_get_config",
+            "update_config": "_handle_update_config",
         }
 
         # Simulated trading account
@@ -123,8 +127,15 @@ class DataService:
         self._strategies_dir = Path(__file__).parent.parent / "strategies"
         self._strategies_dir.mkdir(parents=True, exist_ok=True)
 
+        # Demo mode state
+        self._demo_mode = get_config().is_demo_mode()
+
         # Load external data provider plugins
         self._load_plugins()
+
+    def _is_demo_mode(self) -> bool:
+        """Check if the service is running in demo mode."""
+        return self._demo_mode
 
     def _handle_request(self, req: Dict[str, Any]) -> Dict[str, Any]:
         """根据 action 分发到对应 handler with timeout protection"""
@@ -156,6 +167,10 @@ class DataService:
 
     def _handle_get_markets(self, req: Dict[str, Any]) -> Dict[str, Any]:
         try:
+            if self._is_demo_mode():
+                from src.demo_data import DEMO_STOCKS
+                return {"status": "ok", "data": list(DEMO_STOCKS)}
+
             markets = self._get_markets()
             include_sparkline = req.get("include_sparkline", False)
             if include_sparkline:
@@ -178,6 +193,8 @@ class DataService:
 
     def _handle_refresh(self, req: Dict[str, Any]) -> Dict[str, Any]:
         try:
+            if self._is_demo_mode():
+                return {"status": "ok", "message": "演示模式 - 数据无需刷新"}
             self._refresh_markets()
             self._check_alerts()
             return {"status": "ok", "message": "刷新完成"}
@@ -248,6 +265,26 @@ class DataService:
         code = req.get("code")
         if not code:
             return {"status": "error", "message": "缺少股票代码 code 参数"}
+
+        # Demo mode: return pre-computed analysis synchronously
+        if self._is_demo_mode():
+            from src.demo_data import DEMO_AI_ANALYSES
+            if code in DEMO_AI_ANALYSES:
+                task_id = f"demo_task_{code}_{int(datetime.now().timestamp())}"
+                demo_result = DEMO_AI_ANALYSES[code]
+                with self._tasks_lock:
+                    self._tasks[task_id] = {
+                        "task_id": task_id,
+                        "code": code,
+                        "status": "completed",
+                        "created_at": datetime.now().isoformat(),
+                        "completed_at": datetime.now().isoformat(),
+                        "result": demo_result,
+                        "error": None,
+                    }
+                return {"status": "ok", "task_id": task_id, "message": "演示分析完成（无需 API Key）", "result": demo_result}
+            else:
+                return {"status": "error", "message": f"演示模式不支持该股票代码: {code}"}
 
         # 生成 task_id
         task_id = f"task_{uuid.uuid4().hex[:8]}_{code}_{int(datetime.now().timestamp())}"
@@ -350,6 +387,247 @@ class DataService:
         except Exception as e:
             logger.warning(f"发送分析通知失败: {e}")
 
+    def _handle_analyze_stream(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Streaming AI analysis action.
+
+        When called from stdio mode, falls back to non-streaming analyze
+        (returns a task_id like _handle_analyze). When called from WebSocket
+        mode, the WebSocket handler intercepts this action and streams chunks
+        directly to the client.
+
+        Returns:
+            For stdio: standard task_id response
+            For WebSocket: this handler is not called directly; the WS
+                           handler intercepts and streams instead.
+        """
+        code = req.get("code")
+        if not code:
+            return {"status": "error", "message": "缺少股票代码 code 参数"}
+
+        # Demo mode: return pre-computed analysis
+        if self._is_demo_mode():
+            return self._handle_analyze(req)
+
+        # In stdio mode, fall back to non-streaming analyze
+        task_id = f"task_{uuid.uuid4().hex[:8]}_{code}_{int(datetime.now().timestamp())}"
+
+        with self._tasks_lock:
+            self._tasks[task_id] = {
+                "task_id": task_id,
+                "code": code,
+                "status": "pending",
+                "created_at": datetime.now().isoformat(),
+                "result": None,
+                "error": None,
+            }
+
+        try:
+            get_db().save_task(task_id, code, "pending")
+            get_db().save_task_log(task_id, "analyze", code, "pending")
+        except Exception as e:
+            logger.warning(f"Failed to persist task: {e}")
+
+        thread = threading.Thread(
+            target=self._run_analyze_task, args=(task_id, code)
+        )
+        thread.daemon = True
+        thread.start()
+
+        return {"status": "ok", "task_id": task_id, "message": "分析任务已创建（非流式）"}
+
+    async def _handle_analyze_stream_ws(self, websocket, req: Dict[str, Any]):
+        """
+        Handle analyze_stream over WebSocket.
+
+        Streams analysis chunks token-by-token to the WebSocket client,
+        then sends the final structured result.
+
+        Args:
+            websocket: The WebSocket connection
+            req: The request dict with "code" field
+        """
+        code = req.get("code")
+        if not code:
+            await websocket.send(json.dumps({
+                "type": "stream_error",
+                "message": "缺少股票代码 code 参数"
+            }, ensure_ascii=False, default=str))
+            return
+
+        # Demo mode: send pre-computed result as simulated stream
+        if self._is_demo_mode():
+            await self._handle_analyze_stream_ws_demo(websocket, code)
+            return
+
+        # Create task record
+        task_id = f"task_{uuid.uuid4().hex[:8]}_{code}_{int(datetime.now().timestamp())}"
+        with self._tasks_lock:
+            self._tasks[task_id] = {
+                "task_id": task_id,
+                "code": code,
+                "status": "running",
+                "created_at": datetime.now().isoformat(),
+                "result": None,
+                "error": None,
+            }
+
+        try:
+            get_db().save_task(task_id, code, "running")
+            get_db().save_task_log(task_id, "analyze", code, "running")
+        except Exception as e:
+            logger.warning(f"Failed to persist task for stream: {e}")
+
+        db = get_db()
+        try:
+            # Get analysis context
+            context = db.get_analysis_context(code)
+
+            # Run streaming analysis in thread to avoid blocking event loop
+            from src.analyzer import GeminiAnalyzer
+
+            chunks = []
+            final_result = None
+
+            def run_stream():
+                nonlocal final_result
+                analyzer = GeminiAnalyzer()
+                for event in analyzer.analyze_stream(context):
+                    chunks.append(event)
+                    if event["type"] == "done":
+                        final_result = event["result"]
+
+            # Run the stream collector in a thread
+            stream_thread = threading.Thread(target=run_stream)
+            stream_thread.start()
+
+            # Send a task_id reference first
+            await websocket.send(json.dumps({
+                "type": "stream_start",
+                "task_id": task_id,
+                "code": code,
+            }, ensure_ascii=False, default=str))
+
+            # Poll for chunks and send them
+            chunk_index = 0
+            event_types_seen = set()
+            while stream_thread.is_alive() or chunk_index < len(chunks):
+                while chunk_index < len(chunks):
+                    event = chunks[chunk_index]
+                    chunk_index += 1
+
+                    if event["type"] == "chunk":
+                        await websocket.send(json.dumps({
+                            "type": "stream_chunk",
+                            "chunk": event["data"],
+                        }, ensure_ascii=False, default=str))
+                    elif event["type"] == "done":
+                        event_types_seen.add("done")
+                        # Persist result
+                        with self._tasks_lock:
+                            self._tasks[task_id]["status"] = "completed"
+                            self._tasks[task_id]["result"] = event["result"].to_dict()
+                            self._tasks[task_id]["completed_at"] = datetime.now().isoformat()
+
+                        try:
+                            db.save_task(task_id, code, "completed",
+                                        result_json=json.dumps(event["result"].to_dict()))
+                            db.update_task_log(task_id, "done", completed_at=datetime.now(),
+                                              result_json=json.dumps(event["result"].to_dict()))
+                        except Exception as e:
+                            logger.warning(f"Failed to persist stream result: {e}")
+
+                        await websocket.send(json.dumps({
+                            "type": "stream_done",
+                            "task_id": task_id,
+                            "result": event["result"].to_dict(),
+                        }, ensure_ascii=False, default=str))
+
+                if stream_thread.is_alive():
+                    await asyncio.sleep(0.05)  # Small delay to avoid busy loop
+
+            # If we never got a "done" event (stream failed silently)
+            if "done" not in event_types_seen:
+                with self._tasks_lock:
+                    self._tasks[task_id]["status"] = "failed"
+                    self._tasks[task_id]["error"] = "Stream completed without result"
+                await websocket.send(json.dumps({
+                    "type": "stream_error",
+                    "task_id": task_id,
+                    "message": "流式分析未返回结果",
+                }, ensure_ascii=False, default=str))
+
+        except Exception as e:
+            logger.error(f"Stream analyze error [{code}]: {e}")
+            with self._tasks_lock:
+                if task_id in self._tasks:
+                    self._tasks[task_id]["status"] = "failed"
+                    self._tasks[task_id]["error"] = str(e)
+
+            try:
+                db.save_task(task_id, code, "failed", error=str(e))
+                db.update_task_log(task_id, "failed", completed_at=datetime.now())
+            except Exception:
+                pass
+
+            await websocket.send(json.dumps({
+                "type": "stream_error",
+                "task_id": task_id,
+                "message": str(e),
+            }, ensure_ascii=False, default=str))
+
+    async def _handle_analyze_stream_ws_demo(self, websocket, code: str):
+        """Simulate streaming analysis with pre-computed demo data over WebSocket."""
+        from src.demo_data import DEMO_AI_ANALYSES
+
+        task_id = f"demo_task_{code}_{int(datetime.now().timestamp())}"
+
+        if code not in DEMO_AI_ANALYSES:
+            await websocket.send(json.dumps({
+                "type": "stream_error",
+                "message": f"演示模式不支持该股票代码: {code}",
+            }, ensure_ascii=False, default=str))
+            return
+
+        demo_result = DEMO_AI_ANALYSES[code]
+
+        # Persist task
+        with self._tasks_lock:
+            self._tasks[task_id] = {
+                "task_id": task_id,
+                "code": code,
+                "status": "completed",
+                "created_at": datetime.now().isoformat(),
+                "completed_at": datetime.now().isoformat(),
+                "result": demo_result,
+                "error": None,
+            }
+
+        # Send stream start
+        await websocket.send(json.dumps({
+            "type": "stream_start",
+            "task_id": task_id,
+            "code": code,
+        }, ensure_ascii=False, default=str))
+
+        # Simulate streaming by sending summary text in chunks
+        summary = demo_result.get("analysis_summary", "")
+        chunk_size = 5  # characters per chunk
+        for i in range(0, len(summary), chunk_size):
+            chunk = summary[i:i + chunk_size]
+            await websocket.send(json.dumps({
+                "type": "stream_chunk",
+                "chunk": chunk,
+            }, ensure_ascii=False, default=str))
+            await asyncio.sleep(0.02)  # simulate streaming timing
+
+        # Send final result
+        await websocket.send(json.dumps({
+            "type": "stream_done",
+            "task_id": task_id,
+            "result": demo_result,
+        }, ensure_ascii=False, default=str))
+
     def _handle_get_history(self, req: Dict[str, Any]) -> Dict[str, Any]:
         """获取股票历史数据"""
         code = req.get("code")
@@ -357,6 +635,28 @@ class DataService:
             return {"status": "error", "message": "缺少股票代码 code 参数"}
 
         days = req.get("days", 30)  # 默认 30 天
+
+        # Demo mode: return pre-generated K-line data
+        if self._is_demo_mode():
+            from src.demo_data import DEMO_KLINES
+            if code in DEMO_KLINES:
+                klines = DEMO_KLINES[code]
+                # Convert from [date, open, high, low, close, volume] to dict list
+                data = []
+                for row in klines:
+                    if isinstance(row, list) and len(row) >= 6:
+                        data.append({
+                            "date": str(row[0]),
+                            "open": float(row[1]),
+                            "high": float(row[2]),
+                            "low": float(row[3]),
+                            "close": float(row[4]),
+                            "volume": float(row[5]),
+                            "pct_chg": 0.0,
+                        })
+                return {"status": "ok", "data": data[-days:] if days < len(data) else data}
+            else:
+                return {"status": "ok", "data": [], "message": "演示模式无此股票历史数据"}
 
         try:
             from data_provider.efinance_fetcher import EfinanceFetcher
@@ -390,6 +690,10 @@ class DataService:
         code = req.get("code")
         if not code:
             return {"status": "error", "message": "缺少股票代码 code 参数"}
+
+        # Demo mode: return empty news list (no real search APIs)
+        if self._is_demo_mode():
+            return {"status": "ok", "data": [], "message": "演示模式下不提供实时新闻搜索"}
 
         try:
             from src.search_service import SearchService
@@ -702,6 +1006,15 @@ class DataService:
     def _handle_get_positions(self, req: Dict[str, Any]) -> Dict[str, Any]:
         """获取所有持仓"""
         try:
+            # Demo mode: return pre-configured demo portfolio
+            if self._is_demo_mode():
+                from src.demo_data import DEMO_PORTFOLIO, DEMO_PORTFOLIO_SUMMARY
+                return {
+                    "status": "ok",
+                    "positions": list(DEMO_PORTFOLIO),
+                    "summary": DEMO_PORTFOLIO_SUMMARY,
+                }
+
             db = get_db()
             positions = db.get_positions()
             return {"status": "ok", "positions": [p.to_dict() for p in positions]}
@@ -1314,6 +1627,113 @@ class DataService:
         config.save_json_config({"language": lang})
         return {"status": "ok", "message": f"语言已切换为 {get_available_languages()[lang]}"}
 
+    def _handle_get_config(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """Get current application configuration.
+
+        If a specific 'key' is provided, returns only that config value.
+        Otherwise returns all UI-serializable config fields.
+        """
+        config = get_config()
+        key = req.get("key")
+
+        # Mapping of known config keys to their values
+        config_data = {
+            "theme": config.theme,
+            "language": config.language,
+            "schedule_enabled": config.schedule_enabled,
+            "schedule_time": config.schedule_time,
+            "market_review_enabled": config.market_review_enabled,
+            "report_type": config.report_type,
+            "single_stock_notify": config.single_stock_notify,
+            "analysis_delay": config.analysis_delay,
+            "max_workers": config.max_workers,
+            "debug": config.debug,
+            "mode": config.mode,
+            "indicators": config.indicators,
+            "chart_draw_support_resistance": config.chart_draw_support_resistance,
+            "chart_draw_fibonacci": config.chart_draw_fibonacci,
+            "keybindings": config.keybindings,
+            "schedule_refresh_enabled": config.schedule_refresh_enabled,
+            "schedule_refresh_time": config.schedule_refresh_time,
+            "data_provider_plugins": config.data_provider_plugins,
+            "stock_list": config.stock_list,
+            "log_dir": config.log_dir,
+            "log_level": config.log_level,
+        }
+
+        if key:
+            if key not in config_data:
+                return {"status": "error", "message": f"Unknown config key: {key}"}
+            return {"status": "ok", "data": {key: config_data[key]}}
+
+        return {"status": "ok", "data": config_data}
+
+    def _handle_update_config(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """Update application configuration at runtime.
+
+        Supported keys: theme, language, schedule_time, report_type,
+        single_stock_notify, mode, analysis_delay, max_workers, debug,
+        schedule_enabled, market_review_enabled, indicators,
+        chart_draw_support_resistance, chart_draw_fibonacci,
+        schedule_refresh_enabled, schedule_refresh_time.
+        """
+        config = get_config()
+        key = req.get("key")
+        value = req.get("value")
+
+        if not key:
+            return {"status": "error", "message": "缺少 key 参数"}
+        if value is None:
+            return {"status": "error", "message": "缺少 value 参数"}
+
+        # Map of writable config keys: (attribute, should_save_to_json)
+        writable_config = {
+            "theme": ("theme", True),
+            "language": ("language", True),
+            "schedule_time": ("schedule_time", False),
+            "report_type": ("report_type", False),
+            "single_stock_notify": ("single_stock_notify", False),
+            "mode": ("mode", True),
+            "analysis_delay": ("analysis_delay", False),
+            "max_workers": ("max_workers", False),
+            "debug": ("debug", False),
+            "schedule_enabled": ("schedule_enabled", False),
+            "market_review_enabled": ("market_review_enabled", False),
+            "indicators": ("indicators", True),
+            "chart_draw_support_resistance": ("chart_draw_support_resistance", True),
+            "chart_draw_fibonacci": ("chart_draw_fibonacci", True),
+            "schedule_refresh_enabled": ("schedule_refresh_enabled", False),
+            "schedule_refresh_time": ("schedule_refresh_time", False),
+        }
+
+        if key not in writable_config:
+            return {"status": "error", "message": f"不支持的配置项: {key}"}
+
+        attr_name, save_to_json = writable_config[key]
+
+        # Validate specific keys
+        if key == "theme" and value not in ("dark", "light"):
+            return {"status": "error", "message": "theme 必须是 'dark' 或 'light'"}
+
+        if key == "language":
+            from src.shared.i18n import TRANSLATIONS
+            if value not in TRANSLATIONS:
+                return {"status": "error", "message": f"不支持的语言: {value}"}
+
+        if key == "report_type" and value not in ("simple", "full"):
+            return {"status": "error", "message": "report_type 必须是 'simple' 或 'full'"}
+
+        # Update the config attribute
+        setattr(config, attr_name, value)
+
+        # Persist if applicable
+        if save_to_json:
+            config.save_json_config({key: value})
+        else:
+            config.save_to_env({key.upper(): str(value)})
+
+        return {"status": "ok", "message": f"配置已更新: {key} = {value}"}
+
     def _load_plugins(self):
         """根据配置加载外部数据源插件"""
         import importlib
@@ -1628,6 +2048,23 @@ class DataService:
                     except json.JSONDecodeError:
                         await websocket.send(json.dumps({"status": "error", "message": "invalid json"}))
                         continue
+
+                    # Streaming actions get special treatment: they write
+                    # multiple messages back to the WebSocket.
+                    if req.get("action") == "analyze_stream":
+                        try:
+                            await self._handle_analyze_stream_ws(websocket, req)
+                        except Exception as e:
+                            logger.error(f"WS stream error: {e}")
+                            try:
+                                await websocket.send(json.dumps({
+                                    "type": "stream_error",
+                                    "message": str(e),
+                                }, ensure_ascii=False, default=str))
+                            except Exception:
+                                break
+                        continue
+
                     # _handle_request blocks (thread pool + future.result()),
                     # so run it in a thread to avoid blocking the event loop
                     try:
@@ -1694,8 +2131,48 @@ class DataService:
     # Main Run Loop (stdio mode)
     # ============================================================
 
+    def _run_ws_server_sync(self, host: str = "127.0.0.1", port: int = 9876):
+        """
+        Run the WebSocket server in a daemon thread.
+
+        This method blocks forever (or until self._running becomes False).
+        It calls run_ws_server() which creates its own asyncio event loop.
+        """
+        try:
+            self.run_ws_server(host=host, port=port)
+        except Exception as e:
+            logger.error(f"WebSocket server thread error: {e}")
+
+    def _start_ws_server(self):
+        """
+        Start the WebSocket IPC server in a background daemon thread.
+
+        Reads ws_server_host and ws_server_port from config.
+        Logs a warning and returns silently if websockets is not installed.
+        """
+        try:
+            import websockets  # noqa: F401
+        except ImportError:
+            logger.info("websockets not installed, WebSocket server disabled")
+            return
+
+        config = get_config()
+        host = config.ws_server_host
+        port = config.ws_server_port
+        ws_thread = threading.Thread(
+            target=self._run_ws_server_sync,
+            args=(host, port),
+            daemon=True,
+            name="ws-server",
+        )
+        ws_thread.start()
+        logger.info(f"WebSocket server started on ws://{host}:{port} (background thread)")
+
     def run(self):
         """主循环：读取 stdin，处理请求，发送心跳"""
+        # Start WebSocket IPC server in background daemon thread (P5-1)
+        self._start_ws_server()
+
         last_heartbeat = time.time()
         heartbeat_interval = HEARTBEAT_INTERVAL
 

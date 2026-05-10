@@ -32,13 +32,42 @@ class DataProviderWrapper:
 
     async def fetch_all(self):
         """Fetch market data for all configured stocks."""
-        self._data = {}
-        for code in self._stocks:
-            data = await self._fetch_one(code)
-            if data:
-                self._data[code] = data
+        from src.config import get_config
+        config = get_config()
+
+        if config.is_demo_mode():
+            self._load_demo_data()
+        else:
+            self._data = {}
+            for code in self._stocks:
+                data = await self._fetch_one(code)
+                if data:
+                    self._data[code] = data
         tz_cn = timezone(timedelta(hours=8))
         self._last_update = datetime.now(tz_cn).strftime("%H:%M:%S")
+
+    def _load_demo_data(self):
+        """Load demo market data for display."""
+        from src.demo_data import DEMO_STOCKS
+        self._data = {}
+        for stock in DEMO_STOCKS:
+            code = stock["code"]
+            self._data[code] = MarketData(
+                code=code,
+                name=stock["name"],
+                price=stock["price"],
+                change=self._parse_change_pct(stock.get("change", "0%")),
+                volume=stock.get("volume", "---"),
+            )
+
+    @staticmethod
+    def _parse_change_pct(change_str: str) -> float:
+        """Parse change percentage string like '+0.83%' to float."""
+        try:
+            s = change_str.replace("%", "").replace("+", "")
+            return float(s)
+        except (ValueError, AttributeError):
+            return 0.0
 
     async def _fetch_one(self, code: str) -> Optional[MarketData]:
         """Route to appropriate provider based on code format."""

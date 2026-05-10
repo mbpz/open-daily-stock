@@ -1,4 +1,9 @@
-"""首次启动引导组件"""
+"""首次启动引导组件
+
+P5-4: Added welcome screen with dual-path entry:
+  - "快速体验" → demo mode with pre-loaded data
+  - "开始配置" → existing 3-step wizard
+"""
 from textual.widgets import Static, Input
 from textual.events import Key
 from src.config import get_config
@@ -6,7 +11,23 @@ from src.i18n import _
 
 
 class WizardView(Static):
-    """首次启动引导页面 - 3 步分步表单"""
+    """首次启动引导页面 - 欢迎页 + 3 步分步表单"""
+
+    # Welcome screen (step -1) is shown first, before the 3-step wizard.
+    WELCOME_OPTIONS = [
+        {
+            "key": "quick_demo",
+            "label": _("快速体验"),
+            "desc": _("加载演示数据，无需配置，立即体验"),
+            "action": "demo",
+        },
+        {
+            "key": "start_config",
+            "label": _("开始配置"),
+            "desc": _("配置 API Key 和自选股，正式使用"),
+            "action": "config",
+        },
+    ]
 
     WIZARD_STEPS = [
         {
@@ -36,13 +57,39 @@ class WizardView(Static):
     def __init__(self, on_complete_callback=None, on_skip_callback=None):
         super().__init__()
         self._config = get_config()
-        self._current_step = 0
+        self._current_step = -1  # -1 = welcome screen
         self._field_values = {}
         self._selected_field_idx = 0
         self._on_complete = on_complete_callback
         self._on_skip = on_skip_callback
 
     def compose(self):
+        if self._current_step == -1:
+            yield from self._compose_welcome()
+        else:
+            yield from self._compose_step()
+
+    def _compose_welcome(self):
+        """Compose the welcome/demo-choice screen."""
+        yield Static("=" * 50, id="welcome-header")
+        yield Static(f"  {_('欢迎使用 open-daily-stock')}", id="welcome-title")
+        yield Static(f"  {_('智能股票分析系统')}", id="welcome-subtitle")
+        yield Static("=" * 50, id="welcome-divider")
+        yield Static("", id="welcome-spacer")
+
+        yield Static(f"  {_('请选择启动方式：')}", id="welcome-step-title")
+
+        for i, option in enumerate(self.WELCOME_OPTIONS):
+            marker = "►" if i == self._selected_field_idx else " "
+            yield Static(f"{marker} {option['label']} - {option['desc']}", id=f"welcome-field-{i}")
+
+        yield Static("", id="welcome-hint-area")
+        yield Static("", id="welcome-input-area")
+
+        yield Static(f"  {_('↑↓ 选择  Enter 确认')}", id="welcome-footer")
+
+    def _compose_step(self):
+        """Compose a regular wizard step."""
         step = self.WIZARD_STEPS[self._current_step]
         yield Static("=" * 50, id="wizard-header")
         yield Static(f"  {_('欢迎使用 open-daily-stock')}", id="wizard-title")
@@ -76,6 +123,10 @@ class WizardView(Static):
         self.focus()
 
     def on_key(self, event: Key):
+        if self._current_step == -1:
+            self._handle_welcome_key(event)
+            return
+
         step = self.WIZARD_STEPS[self._current_step]
 
         if event.key == "escape":
@@ -98,6 +149,40 @@ class WizardView(Static):
 
             field = step["fields"][self._selected_field_idx]
             self._edit_field(field)
+
+    def _handle_welcome_key(self, event: Key):
+        """Handle key events on the welcome screen."""
+        if event.key == "up":
+            self._selected_field_idx = max(0, self._selected_field_idx - 1)
+            self._refresh_welcome()
+        elif event.key == "down":
+            self._selected_field_idx = min(len(self.WELCOME_OPTIONS) - 1, self._selected_field_idx + 1)
+            self._refresh_welcome()
+        elif event.key == "enter":
+            self._select_welcome_option()
+
+    def _select_welcome_option(self):
+        """Process the selected welcome option."""
+        option = self.WELCOME_OPTIONS[self._selected_field_idx]
+        if option["action"] == "demo":
+            # Enter demo mode
+            from src.demo_data import apply_demo_mode, DEMO_STOCKS
+            apply_demo_mode(self._config)
+            self._config.stock_list = [s["code"] for s in DEMO_STOCKS]
+            if self._on_complete:
+                self._on_complete()
+        elif option["action"] == "config":
+            # Proceed to step 1 of the 3-step wizard
+            self._current_step = 0
+            self._selected_field_idx = 0
+            self._clear_and_recompose()
+
+    def _refresh_welcome(self):
+        """Refresh welcome screen display."""
+        for i, option in enumerate(self.WELCOME_OPTIONS):
+            marker = "►" if i == self._selected_field_idx else " "
+            el = self.query_one(f"#welcome-field-{i}", Static)
+            el.update(f"{marker} {option['label']} - {option['desc']}")
 
     def _refresh_display(self):
         """刷新字段显示"""
@@ -168,6 +253,10 @@ class WizardView(Static):
 
     def _complete_wizard(self):
         """完成引导，保存配置并进入主界面"""
+        # 设置 mode 为 live
+        self._config.mode = "live"
+        self._config.save_json_config({"mode": "live"})
+
         # 保存到 .env
         updates = {}
         for key, value in self._field_values.items():
@@ -186,7 +275,7 @@ class WizardView(Static):
 
     def _clear_and_recompose(self):
         """清除并重新组合"""
-        for widget in list(self.children):
-            widget.remove()
+        for child in list(self.children):
+            child.remove()
         for w in self.compose():
             self.mount(w)

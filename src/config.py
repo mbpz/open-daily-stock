@@ -122,6 +122,9 @@ class Config:
     http_proxy: Optional[str] = None  # HTTP 代理 (例如: http://127.0.0.1:10809)
     https_proxy: Optional[str] = None # HTTPS 代理
 
+    # === 运行模式配置 ===
+    mode: Optional[str] = None  # None=未设置, "demo"=演示模式, "live"=正式模式
+
     # === 语言配置 ===
     language: str = "zh"  # 语言偏好: zh / ja / ko
 
@@ -510,6 +513,8 @@ class Config:
                         config.keybindings = migrated
                 if 'theme' in data and isinstance(data['theme'], str):
                     config.theme = data['theme']
+                if 'mode' in data and isinstance(data['mode'], str):
+                    config.mode = data['mode']
         except (json.JSONDecodeError, IOError):
             pass  # 使用默认值，向后兼容
         return config
@@ -624,15 +629,56 @@ class Config:
         if 'LANGUAGE' in updates:
             self.language = updates['LANGUAGE']
 
+    def is_demo_mode(self) -> bool:
+        """
+        检查是否处于演示模式。
+
+        Returns:
+            True 如果 mode == "demo"
+        """
+        return self.mode == "demo"
+
+    def has_api_key(self) -> bool:
+        """
+        检查是否配置了任何 AI API Key。
+
+        Returns:
+            True 如果至少配置了 Gemini 或 OpenAI API Key
+        """
+        return bool(self.gemini_api_key or self.openai_api_key)
+
+    def set_demo_mode(self, enabled: bool = True) -> None:
+        """
+        设置演示模式开关。
+
+        当 enabled=True 时：
+        1. 从 demo_data 加载演示股票列表
+        2. 设置 mode="demo" 并持久化到 config.json
+
+        当 enabled=False 时：
+        1. 清除 mode 设置（恢复为 live）
+        2. 持久化到 config.json
+        """
+        if enabled:
+            from src.demo_data import apply_demo_mode
+            apply_demo_mode(self)
+        else:
+            from src.demo_data import exit_demo_mode
+            exit_demo_mode(self)
+
     def is_first_time_setup(self) -> bool:
         """
         检查是否需要显示首次启动引导
 
         满足以下任一条件返回 True：
-        - .env 文件不存在
-        - AI API Key 未配置
-        - 自选股列表为空
+        - .env 文件不存在且不在演示模式
+        - AI API Key 未配置且不在演示模式
+        - 自选股列表为空且不在演示模式
+
+        演示模式下不弹出首次配置向导。
         """
+        if self.is_demo_mode():
+            return False
         env_path = Path(__file__).parent / '.env'
         if not env_path.exists():
             return True
@@ -657,7 +703,10 @@ class Config:
         if not self.tushare_token:
             warnings.append("提示：未配置 Tushare Token，将使用其他数据源")
         
-        if not self.gemini_api_key and not self.openai_api_key:
+        if self.is_demo_mode():
+            # 演示模式下不警告 API key 缺失
+            pass
+        elif not self.gemini_api_key and not self.openai_api_key:
             warnings.append("警告：未配置 Gemini 或 OpenAI API Key，AI 分析功能将不可用")
         elif not self.gemini_api_key:
             warnings.append("提示：未配置 Gemini API Key，将使用 OpenAI 兼容 API")

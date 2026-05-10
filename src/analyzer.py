@@ -934,9 +934,266 @@ class GeminiAnalyzer:
                 error_message=str(e),
             )
     
+    def _call_gemini_stream(self, prompt: str, generation_config: dict):
+        """
+        Call Gemini API with streaming enabled.
+
+        Yields text chunks as they arrive from the API.
+
+        Args:
+            prompt: The formatted analysis prompt
+            generation_config: Generation configuration
+
+        Yields:
+            str: Text chunks from the streaming response
+        """
+        if self._use_openai and self._openai_client:
+            yield from self._call_openai_stream(prompt, generation_config)
+            return
+
+        config = get_config()
+        max_retries = config.gemini_max_retries
+        base_delay = config.gemini_retry_delay
+
+        last_error = None
+        tried_fallback = getattr(self, '_using_fallback', False)
+
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    delay = base_delay * (2 ** (attempt - 1))
+                    delay = min(delay, 60)
+                    logger.info(f"[Gemini Stream] 第 {attempt + 1} 次重试，等待 {delay:.1f} 秒...")
+                    time.sleep(delay)
+
+                response = self._model.generate_content(
+                    prompt,
+                    generation_config=generation_config,
+                    stream=True,
+                    request_options={"timeout": 120}
+                )
+
+                full_text = []
+                for chunk in response:
+                    if chunk.text:
+                        full_text.append(chunk.text)
+                        yield chunk.text
+
+                # Successfully streamed — return the full text for final parsing
+                return
+
+            except Exception as e:
+                last_error = e
+                error_str = str(e)
+
+                is_rate_limit = '429' in error_str or 'quota' in error_str.lower() or 'rate' in error_str.lower()
+
+                if is_rate_limit:
+                    logger.warning(f"[Gemini Stream] API 限流 (429)，第 {attempt + 1}/{max_retries} 次尝试")
+                    if attempt >= max_retries // 2 and not tried_fallback:
+                        if self._switch_to_fallback_model():
+                            tried_fallback = True
+                            logger.info("[Gemini Stream] 已切换到备选模型，继续重试")
+                else:
+                    logger.warning(f"[Gemini Stream] API 调用失败，第 {attempt + 1}/{max_retries} 次尝试: {error_str[:100]}")
+
+        # Fallback to OpenAI if available
+        if self._openai_client:
+            logger.warning("[Gemini Stream] 所有重试失败，尝试 OpenAI 兼容 API 流式")
+            try:
+                yield from self._call_openai_stream(prompt, generation_config)
+                return
+            except Exception as openai_error:
+                logger.error(f"[OpenAI Stream] 备选也失败: {openai_error}")
+                raise last_error or openai_error
+
+        raise last_error or Exception("所有 AI API 流式调用失败")
+
+    def _call_openai_stream(self, prompt: str, generation_config: dict):
+        """
+        Call OpenAI-compatible API with streaming enabled.
+
+        Yields text chunks as they arrive from the API.
+
+        Args:
+            prompt: The formatted analysis prompt
+            generation_config: Generation configuration
+
+        Yields:
+            str: Text chunks from the streaming response
+        """
+        config = get_config()
+        max_retries = config.gemini_max_retries
+        base_delay = config.gemini_retry_delay
+
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    delay = base_delay * (2 ** (attempt - 1))
+                    delay = min(delay, 60)
+                    logger.info(f"[OpenAI Stream] 第 {attempt + 1} 次重试，等待 {delay:.1f} 秒...")
+                    time.sleep(delay)
+
+                stream = self._openai_client.chat.completions.create(
+                    model=self._current_model_name,
+                    messages=[
+                        {"role": "system", "content": self._system_prompt},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=generation_config.get('temperature', config.openai_temperature),
+                    max_tokens=generation_config.get('max_output_tokens', 8192),
+                    stream=True,
+                )
+
+                for chunk in stream:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        yield chunk.choices[0].delta.content
+
+                return
+
+            except Exception as e:
+                error_str = str(e)
+                is_rate_limit = '429' in error_str or 'rate' in error_str.lower() or 'quota' in error_str.lower()
+
+                if is_rate_limit:
+                    logger.warning(f"[OpenAI Stream] API 限流，第 {attempt + 1}/{max_retries} 次尝试")
+                else:
+                    logger.warning(f"[OpenAI Stream] API 调用失败，第 {attempt + 1}/{max_retries} 次尝试: {error_str[:100]}")
+
+                if attempt == max_retries - 1:
+                    raise
+
+        raise Exception("OpenAI 流式 API 调用失败，已达最大重试次数")
+
+    def analyze_stream(
+        self,
+        context: Dict[str, Any],
+        news_context: Optional[str] = None
+    ):
+        """
+        Analyze a single stock with streaming response.
+
+        Yields chunks as they arrive from the LLM, then yields a final
+        "done" event with the parsed AnalysisResult.
+
+        Each yield is a dict:
+          {"type": "chunk", "data": "partial text..."}
+        Final yield:
+          {"type": "done", "result": AnalysisResult}
+
+        Args:
+            context: Analysis context data (same as analyze())
+            news_context: Pre-searched news content (optional)
+
+        Yields:
+            dict: Stream events
+        """
+        code = context.get('code', 'Unknown')
+        config_obj = get_config()
+
+        # Request delay
+        request_delay = config_obj.gemini_request_delay
+        if request_delay > 0:
+            logger.debug(f"[LLM Stream] 请求前等待 {request_delay:.1f} 秒...")
+            time.sleep(request_delay)
+
+        # Resolve stock name
+        name = context.get('stock_name')
+        if not name or name.startswith('股票'):
+            if 'realtime' in context and context['realtime'].get('name'):
+                name = context['realtime']['name']
+            else:
+                name = STOCK_NAME_MAP.get(code, f'股票{code}')
+
+        # If model not available, yield error result
+        if not self.is_available():
+            result = AnalysisResult(
+                code=code,
+                name=name,
+                sentiment_score=50,
+                trend_prediction='震荡',
+                operation_advice='持有',
+                confidence_level='低',
+                analysis_summary='AI 分析功能未启用（未配置 API Key）',
+                risk_warning='请配置 Gemini API Key 后重试',
+                success=False,
+                error_message='Gemini API Key 未配置',
+            )
+            yield {"type": "done", "result": result}
+            return
+
+        try:
+            # Determine market and set prompts
+            is_cn = (
+                context.get("market") == "CN"
+                or (code.isdigit() and len(code) == 6)
+            )
+            self._cn_mode = is_cn
+            if is_cn:
+                self._system_prompt = CN_ANALYST_SYSTEM_PROMPT
+            else:
+                self._system_prompt = self.SYSTEM_PROMPT
+
+            # Format prompt
+            if self._cn_mode:
+                prompt = CNPromptBuilder.build_analysis_prompt(
+                    context,
+                    inst_context="",
+                    news_context=news_context or "",
+                    industry_context="",
+                )
+            else:
+                prompt = self._format_prompt(context, name, news_context)
+
+            model_name = getattr(self, '_current_model_name', 'unknown')
+            logger.info(f"========== AI 流式分析 {name}({code}) ==========")
+            logger.info(f"[LLM Stream] 模型: {model_name}, Prompt 长度: {len(prompt)} 字符")
+            logger.debug(f"=== 流式 Prompt ===\\n{prompt}\\n=== End Prompt ===")
+
+            generation_config = {
+                "temperature": config_obj.gemini_temperature,
+                "max_output_tokens": 8192,
+            }
+
+            # Stream tokens
+            start_time = time.time()
+            full_text_parts = []
+
+            for chunk_text in self._call_gemini_stream(prompt, generation_config):
+                full_text_parts.append(chunk_text)
+                yield {"type": "chunk", "data": chunk_text}
+
+            elapsed = time.time() - start_time
+            full_text = "".join(full_text_parts)
+            logger.info(f"[LLM Stream] 响应完成, 耗时 {elapsed:.2f}s, 总长度 {len(full_text)} 字符")
+
+            # Parse the full response
+            result = self._parse_response(full_text, code, name)
+            result.raw_response = full_text
+            result.search_performed = bool(news_context)
+
+            logger.info(f"[LLM Stream] {name}({code}) 分析完成: {result.trend_prediction}, 评分 {result.sentiment_score}")
+            yield {"type": "done", "result": result}
+
+        except Exception as e:
+            logger.error(f"AI 流式分析 {name}({code}) 失败: {e}")
+            result = AnalysisResult(
+                code=code,
+                name=name,
+                sentiment_score=50,
+                trend_prediction='震荡',
+                operation_advice='持有',
+                confidence_level='低',
+                analysis_summary=f'流式分析过程出错: {str(e)[:100]}',
+                risk_warning='分析失败，请稍后重试或手动分析',
+                success=False,
+                error_message=str(e),
+            )
+            yield {"type": "done", "result": result}
+
     def _format_prompt(
-        self, 
-        context: Dict[str, Any], 
+        self,
+        context: Dict[str, Any],
         name: str,
         news_context: Optional[str] = None
     ) -> str:

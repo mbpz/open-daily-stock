@@ -98,6 +98,7 @@ class ConfigPage(ft.Container):
                 alerts_section,
                 ft.Container(height=20),
                 save_btn,
+                self._build_exit_demo_btn() if config.is_demo_mode() else ft.Container(),
             ], scroll=ft.ScrollMode.AUTO),
             padding=10,
         )
@@ -366,6 +367,42 @@ class ConfigPage(ft.Container):
             self.app.page.show_snack_bar(
                 ft.SnackBar(content=ft.Text(_("保存失败")), open=True)
             )
+
+    def _build_exit_demo_btn(self) -> ft.Container:
+        """Build exit demo mode button (P5-4)."""
+        return ft.Container(
+            content=ft.Column([
+                ft.Text(_("演示模式"), size=16, weight=ft.FontWeight.BOLD,
+                        color=ft.Colors.ORANGE),
+                ft.Text(_("当前处于演示模式，AI 分析使用预计算结果。"
+                          "配置 API Key 后即可解锁实时分析。"),
+                        size=13, color=ft.Colors.GREY),
+                ft.Container(height=10),
+                ft.Button(
+                    _("退出演示模式"),
+                    icon=ft.Icons.EXIT_TO_APP,
+                    on_click=self._exit_demo_mode,
+                    bgcolor=ACCENT_COLOR,
+                    color=ft.Colors.WHITE,
+                ),
+            ]),
+            padding=15,
+            bgcolor=CARD_BG,
+            border_radius=10,
+        )
+
+    def _exit_demo_mode(self, e):
+        """Handle exit demo mode button click."""
+        from src.demo_data import exit_demo_mode
+
+        config = get_config()
+        exit_demo_mode(config)
+        config.__class__.reset_instance()
+
+        # Show success message and suggest reload
+        self.app.page.show_snack_bar(
+            ft.SnackBar(content=ft.Text(_("已退出演示模式，请重新启动应用以完成设置")), open=True)
+        )
 
     def _on_language_change(self, e):
         """Handle language change"""

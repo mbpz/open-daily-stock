@@ -1,6 +1,18 @@
 [project]
-name = "daily-stock-analysis"
+name = "open-daily-stock"
+version = "0.4.0"
+description = "Local-first A-share/HK/US stock analyzer with AI, TUI+GUI"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
 dependencies = ["textual>=0.1.0"]
+
+[project.scripts]
+open-daily-stock = "main:main"
+
+[project.urls]
+Homepage = "https://github.com/mbpz/open-daily-stock"
+Repository = "https://github.com/mbpz/open-daily-stock"
 
 [tool.black]
 line-length = 120

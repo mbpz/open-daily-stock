@@ -57,6 +57,19 @@ open-daily-stock 是一款面向个人投资者的本地股票分析工具，集
 
 **open-daily-stock 独占:** TUI+GUI双模式 + 画线工具 + 机构追踪 + 模拟交易，所有竞品均无此组合
 
+## Quick Install
+
+```bash
+# macOS
+brew install mbpz/tap/open-daily-stock
+
+# Windows
+winget install mbpz.open-daily-stock
+
+# Any platform (pip)
+pip install open-daily-stock
+```
+
 ## 快速开始
 
 ### GUI 模式（推荐普通用户）
