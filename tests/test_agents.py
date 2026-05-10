@@ -93,27 +93,29 @@ def sample_context():
 @pytest.fixture
 def mock_analyzer():
     """Mock GeminiAnalyzer for testing without actual API calls."""
+    from src.analyzer import AnalysisResult
+
     analyzer = MagicMock()
     analyzer.is_available.return_value = True
     # _call_api_with_retry returns mock LLM response
     analyzer._call_api_with_retry.return_value = "Mock specialist analysis report content"
-    # _parse_response returns a valid AnalysisResult
-    from src.analyzer import AnalysisResult
-    mock_result = AnalysisResult(
-        code="600519",
-        name="贵州茅台",
-        sentiment_score=72,
-        trend_prediction="看多",
-        operation_advice="买入",
-        confidence_level="中",
-        technical_analysis="技术面看多",
-        fundamental_analysis="基本面良好",
-        news_summary="消息面偏正面",
-        analysis_summary="综合分析看多",
-        risk_warning="注意回调风险",
-        success=True,
-    )
-    analyzer._parse_response.return_value = mock_result
+    # _parse_response returns a valid AnalysisResult, using the passed code/name
+    def make_result(text, code, name):
+        return AnalysisResult(
+            code=code,
+            name=name,
+            sentiment_score=72,
+            trend_prediction="看多",
+            operation_advice="买入",
+            confidence_level="中",
+            technical_analysis="技术面看多",
+            fundamental_analysis="基本面良好",
+            news_summary="消息面偏正面",
+            analysis_summary="综合分析看多",
+            risk_warning="注意回调风险",
+            success=True,
+        )
+    analyzer._parse_response.side_effect = make_result
     return analyzer
 
 
@@ -640,6 +642,7 @@ class TestDeepAnalyzeIntegration:
 
     def test_deep_analyze_no_enabled_agents(self):
         """deep_analyze returns error when no agents enabled."""
+        from src.analyzer import GeminiAnalyzer
         with patch('src.analyzer.get_config') as mock_config:
             config = MagicMock()
             config.gemini_api_key = "fake_key"
@@ -658,7 +661,6 @@ class TestDeepAnalyzeIntegration:
 
             # We need to mock _init_model to avoid actual API init
             with patch.object(GeminiAnalyzer, '_init_model'):
-                from src.analyzer import GeminiAnalyzer
                 analyzer = GeminiAnalyzer()
                 analyzer._model = MagicMock()  # Fake model to pass is_available check
 

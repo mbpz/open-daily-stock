@@ -138,9 +138,10 @@ class TestScoreFuzzy:
     """测试 _score_fuzzy（模糊字符匹配）。"""
 
     def test_all_chars_in_order_match(self):
-        score = _score_fuzzy("sx", "刷新行情")
-        assert score > 0  # 's' at 0, 'x' at ? — depends on chars
-        # Let's use English for reliable testing
+        # Chinese chars '刷' and '新' in "刷新行情" - both exist
+        score = _score_fuzzy("刷新", "刷新行情")
+        assert score > 0
+        # English match
         score = _score_fuzzy("ref", "refresh")
         assert score > 0
 
@@ -176,7 +177,8 @@ class TestSearchCommands:
     def test_empty_query_returns_all(self):
         """空查询返回所有命令。"""
         results = search_commands("")
-        assert len(results) >= 25
+        # Default limit is 20, so we get at least 20 commands
+        assert len(results) >= 20
 
     def test_chinese_query_finds_matching(self):
         """中文查询找到匹配命令。"""
@@ -214,7 +216,7 @@ class TestSearchCommands:
 
     def test_keyword_search(self):
         """通过关键词搜索返回关联命令。"""
-        results = search_commands("暗色")  # Should match config.theme_toggle keywords
+        results = search_commands("深色")  # Matches config.theme_toggle keywords
         has_theme = any(cmd.id == "config.theme_toggle" for cmd, _ in results)
         assert has_theme
 
@@ -257,12 +259,20 @@ class TestRecentCommands:
 
     def test_max_recent_limit(self):
         """最近命令最多保存 10 条。"""
-        for i in range(15):
-            record_recent_command(f"test.cmd.{i}")
+        # Use actual registered commands
+        registered_ids = [
+            "markets.refresh", "markets.add_stock", "analyze.quick",
+            "analyze.deep", "analyze.stream", "portfolio.add",
+            "portfolio.view", "trading.buy", "trading.sell",
+            "trading.summary", "screener.open", "financials.open",
+            "strategies.list", "strategies.import", "strategies.export",
+        ]
+        for cid in registered_ids:
+            record_recent_command(cid)
         recent = get_recent_commands()
         assert len(recent) == 10
         # Most recent should be the last one recorded
-        assert recent[0].id == "test.cmd.14"
+        assert recent[0].id == "strategies.export"
 
 
 # ============================================================
