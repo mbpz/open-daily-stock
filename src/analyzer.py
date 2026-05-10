@@ -13,7 +13,8 @@ A股自选股智能分析系统 - AI分析层
 import json
 import logging
 import time
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List
 
 from tenacity import (
@@ -28,6 +29,33 @@ from src.config import get_config
 from src.cn_prompts import CNPromptBuilder, CN_ANALYST_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
+
+# ============================================================
+# P5-5: Deep Analysis Specialist System Prompts
+# ============================================================
+
+TECHNICAL_SYSTEM_PROMPT = """You are a technical analysis specialist.
+Analyze: price trends, MA crossovers, RSI/MACD/Bollinger/KDJ signals, support/resistance, volume patterns.
+Output structured JSON: {"trend": "bullish/bearish/neutral", "key_signals": [...], "support": float, "resistance": float, "score": 0-100}"""
+
+FUNDAMENTAL_SYSTEM_PROMPT = """You are a fundamental analysis specialist.
+Analyze: PE/PB ratios, revenue growth, profit margins, institutional flows, industry position.
+Output structured JSON: {"valuation": "undervalued/fair/overvalued", "key_metrics": [...], "risks": [...], "score": 0-100}"""
+
+NEWS_SYSTEM_PROMPT = """You are a market sentiment specialist.
+Analyze: recent news sentiment, social media buzz, regulatory changes, sector rotation.
+Output structured JSON: {"sentiment": "positive/negative/neutral", "key_drivers": [...], "risk_events": [...], "score": 0-100}"""
+
+SYNTHESIZER_PROMPT = """You are a lead investment analyst. Synthesize the three specialist reports into a final decision.
+Output: final verdict (看涨/看跌/中性), composite score, key catalysts, risk factors, operation advice."""
+
+# Agent order for parallel execution
+DEEP_AGENTS = ["technical", "fundamental", "news"]
+DEEP_PROMPTS = {
+    "technical": TECHNICAL_SYSTEM_PROMPT,
+    "fundamental": FUNDAMENTAL_SYSTEM_PROMPT,
+    "news": NEWS_SYSTEM_PROMPT,
+}
 
 
 # 股票名称映射（常见股票）
@@ -284,6 +312,67 @@ class AnalysisResult:
         """返回置信度星级"""
         star_map = {'高': '⭐⭐⭐', '中': '⭐⭐', '低': '⭐'}
         return star_map.get(self.confidence_level, '⭐⭐')
+
+
+@dataclass
+class DeepAnalysisResult:
+    """
+    P5-5: Deep Analysis result produced by 4-agent collaboration.
+
+    Contains individual specialist outputs plus a synthesized final verdict.
+    """
+    code: str
+    name: str
+
+    # Final synthesized verdict
+    sentiment_score: int = 50
+    trend_prediction: str = "震荡"
+    operation_advice: str = "观望"
+    composite_score: int = 50
+    final_verdict: str = "中性"
+    key_catalysts: List[str] = field(default_factory=list)
+    risk_factors: List[str] = field(default_factory=list)
+
+    # Individual specialist outputs
+    technical: Optional[Dict[str, Any]] = None
+    fundamental: Optional[Dict[str, Any]] = None
+    news: Optional[Dict[str, Any]] = None
+
+    # Synthesis raw text
+    synthesis_text: str = ""
+    raw_specialist_outputs: Dict[str, str] = field(default_factory=dict)
+
+    success: bool = True
+    error_message: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "code": self.code,
+            "name": self.name,
+            "sentiment_score": self.sentiment_score,
+            "trend_prediction": self.trend_prediction,
+            "operation_advice": self.operation_advice,
+            "composite_score": self.composite_score,
+            "final_verdict": self.final_verdict,
+            "key_catalysts": self.key_catalysts,
+            "risk_factors": self.risk_factors,
+            "technical": self.technical,
+            "fundamental": self.fundamental,
+            "news": self.news,
+            "synthesis_text": self.synthesis_text,
+            "raw_specialist_outputs": self.raw_specialist_outputs,
+            "success": self.success,
+            "error_message": self.error_message,
+        }
+
+    @staticmethod
+    def error_result(code: str, name: str, message: str) -> "DeepAnalysisResult":
+        return DeepAnalysisResult(
+            code=code,
+            name=name,
+            success=False,
+            error_message=message,
+        )
 
 
 class GeminiAnalyzer:
@@ -793,23 +882,25 @@ class GeminiAnalyzer:
         raise last_error or Exception("所有 AI API 调用失败，已达最大重试次数")
     
     def analyze(
-        self, 
+        self,
         context: Dict[str, Any],
-        news_context: Optional[str] = None
+        news_context: Optional[str] = None,
+        enable_rag: bool = True,
     ) -> AnalysisResult:
         """
         分析单只股票
-        
+
         流程：
-        1. 格式化输入数据（技术面 + 新闻）
+        1. 格式化输入数据（技术面 + 新闻 + RAG 历史上下文）
         2. 调用 Gemini API（带重试和模型切换）
         3. 解析 JSON 响应
         4. 返回结构化结果
-        
+
         Args:
             context: 从 storage.get_analysis_context() 获取的上下文数据
             news_context: 预先搜索的新闻内容（可选）
-            
+            enable_rag: 是否启用 RAG 历史分析上下文（默认 True）
+
         Returns:
             AnalysisResult 对象
         """
@@ -860,6 +951,17 @@ class GeminiAnalyzer:
             else:
                 self._system_prompt = self.SYSTEM_PROMPT
 
+            # === P5-6: RAG historical analysis context ===
+            rag_context = ""
+            if enable_rag:
+                try:
+                    from src.rag import build_rag_context
+                    rag_context = build_rag_context(code)
+                    if rag_context:
+                        logger.debug(f"[RAG] 为 {code} 注入了历史分析上下文 ({len(rag_context)} 字符)")
+                except Exception as e:
+                    logger.warning(f"[RAG] 获取历史上下文失败 (非致命): {e}")
+
             # Format input (includes technical data + news)
             if self._cn_mode:
                 prompt = CNPromptBuilder.build_analysis_prompt(
@@ -870,6 +972,10 @@ class GeminiAnalyzer:
                 )
             else:
                 prompt = self._format_prompt(context, name, news_context)
+
+            # Prepend RAG historical context to prompt
+            if rag_context:
+                prompt = rag_context + "\n\n" + prompt
             
             # 获取模型名称
             model_name = getattr(self, '_current_model_name', None)
@@ -1068,7 +1174,8 @@ class GeminiAnalyzer:
     def analyze_stream(
         self,
         context: Dict[str, Any],
-        news_context: Optional[str] = None
+        news_context: Optional[str] = None,
+        enable_rag: bool = True,
     ):
         """
         Analyze a single stock with streaming response.
@@ -1084,6 +1191,7 @@ class GeminiAnalyzer:
         Args:
             context: Analysis context data (same as analyze())
             news_context: Pre-searched news content (optional)
+            enable_rag: 是否启用 RAG 历史分析上下文（默认 True）
 
         Yields:
             dict: Stream events
@@ -1134,6 +1242,17 @@ class GeminiAnalyzer:
             else:
                 self._system_prompt = self.SYSTEM_PROMPT
 
+            # === P5-6: RAG historical analysis context ===
+            rag_context = ""
+            if enable_rag:
+                try:
+                    from src.rag import build_rag_context
+                    rag_context = build_rag_context(code)
+                    if rag_context:
+                        logger.debug(f"[RAG Stream] 为 {code} 注入了历史分析上下文 ({len(rag_context)} 字符)")
+                except Exception as e:
+                    logger.warning(f"[RAG Stream] 获取历史上下文失败 (非致命): {e}")
+
             # Format prompt
             if self._cn_mode:
                 prompt = CNPromptBuilder.build_analysis_prompt(
@@ -1144,6 +1263,10 @@ class GeminiAnalyzer:
                 )
             else:
                 prompt = self._format_prompt(context, name, news_context)
+
+            # Prepend RAG historical context to prompt
+            if rag_context:
+                prompt = rag_context + "\n\n" + prompt
 
             model_name = getattr(self, '_current_model_name', 'unknown')
             logger.info(f"========== AI 流式分析 {name}({code}) ==========")
@@ -1558,16 +1681,485 @@ class GeminiAnalyzer:
             AnalysisResult 列表
         """
         results = []
-        
+
         for i, context in enumerate(contexts):
             if i > 0:
                 logger.debug(f"等待 {delay_between} 秒后继续...")
                 time.sleep(delay_between)
-            
+
             result = self.analyze(context)
             results.append(result)
-        
+
         return results
+
+    # ============================================================
+    # P5-5: Deep Analysis (Multi-Agent Mode)
+    # ============================================================
+
+    def deep_analyze(
+        self,
+        context: Dict[str, Any],
+        enabled_agents: Optional[List[str]] = None,
+    ) -> DeepAnalysisResult:
+        """
+        Run deep analysis with 3 specialist agents + 1 synthesizer.
+
+        Workflow:
+        1. Run technical, fundamental, news agents in parallel
+        2. Collect all 3 specialist outputs
+        3. Synthesizer produces final integrated verdict
+        4. Fall back to single-shot if any specialist fails
+
+        Args:
+            context: Stock analysis context (from storage.get_analysis_context())
+            enabled_agents: List of agent names to enable (e.g. ["technical", "fundamental", "news"])
+                            If None, uses config value deep_analysis_agents.
+
+        Returns:
+            DeepAnalysisResult with individual specialist scores and final verdict
+        """
+        code = context.get('code', 'Unknown')
+        config = get_config()
+
+        # Resolve stock name
+        name = context.get('stock_name')
+        if not name or name.startswith('股票'):
+            if 'realtime' in context and context['realtime'].get('name'):
+                name = context['realtime']['name']
+            else:
+                name = STOCK_NAME_MAP.get(code, f'股票{code}')
+
+        # Determine which agents to run
+        if enabled_agents is None:
+            enabled_str = getattr(config, 'deep_analysis_agents', 'technical,fundamental,news')
+            enabled_agents = [a.strip() for a in enabled_str.split(',') if a.strip()]
+        enabled_agents = [a for a in enabled_agents if a in DEEP_AGENTS]
+
+        if not enabled_agents:
+            return DeepAnalysisResult.error_result(
+                code, name, "没有启用的深度分析代理"
+            )
+
+        # If model not available, return error for all agents
+        if not self.is_available():
+            return DeepAnalysisResult.error_result(
+                code, name, "AI 分析功能未启用（未配置 API Key）"
+            )
+
+        # Build per-specialist context prompts
+        specialist_prompts = self._build_specialist_prompts(context, name, enabled_agents)
+
+        # Run specialist agents in parallel
+        logger.info(f"[DeepAnalyze] 启动深度分析: {name}({code}), agents={enabled_agents}")
+        start_time = time.time()
+
+        specialist_results: Dict[str, Optional[Dict[str, Any]]] = {}
+        raw_outputs: Dict[str, str] = {}
+        failed_agents: List[str] = []
+
+        with ThreadPoolExecutor(max_workers=min(len(enabled_agents), 3)) as pool:
+            futures = {}
+            for agent_name in enabled_agents:
+                prompt = specialist_prompts[agent_name]
+                system_prompt = DEEP_PROMPTS[agent_name]
+                futures[pool.submit(
+                    self._run_specialist, agent_name, system_prompt, prompt
+                )] = agent_name
+
+            for future in as_completed(futures):
+                agent_name = futures[future]
+                try:
+                    result_dict, raw_text = future.result(timeout=90)
+                    specialist_results[agent_name] = result_dict
+                    raw_outputs[agent_name] = raw_text
+                    score = result_dict.get('score', 50) if result_dict else 50
+                    logger.info(f"[DeepAnalyze] {agent_name}: score={score}")
+                except Exception as e:
+                    logger.warning(f"[DeepAnalyze] {agent_name} agent failed: {e}")
+                    failed_agents.append(agent_name)
+                    specialist_results[agent_name] = None
+                    raw_outputs[agent_name] = str(e)
+
+        elapsed_specialists = time.time() - start_time
+        logger.info(f"[DeepAnalyze] 专家分析完成, 耗时 {elapsed_specialists:.2f}s, 失败: {failed_agents}")
+
+        # Fall back to single-shot if ALL agents failed
+        successful = [a for a in enabled_agents if a not in failed_agents]
+        if not successful:
+            logger.warning(f"[DeepAnalyze] 所有专家失败, 回退到单次分析")
+            single_result = self.analyze(context)
+            return DeepAnalysisResult(
+                code=code,
+                name=name,
+                sentiment_score=single_result.sentiment_score,
+                trend_prediction=single_result.trend_prediction,
+                operation_advice=single_result.operation_advice,
+                composite_score=single_result.sentiment_score,
+                final_verdict=self._score_to_verdict(single_result.sentiment_score),
+                key_catalysts=(single_result.key_points or "").split(','),
+                risk_factors=[single_result.risk_warning] if single_result.risk_warning else [],
+                technical=None,
+                fundamental=None,
+                news=None,
+                synthesis_text=f"单次分析回退 (专家全部失败: {', '.join(failed_agents)}): {single_result.analysis_summary}",
+                raw_specialist_outputs=raw_outputs,
+                success=True,
+            )
+
+        # Synthesize: combine specialist outputs into final verdict
+        synthesis_result = self._synthesize(
+            specialist_results, raw_outputs, context, name, code, failed_agents
+        )
+
+        total_elapsed = time.time() - start_time
+        logger.info(f"[DeepAnalyze] 深度分析完成, 总耗时 {total_elapsed:.2f}s, "
+                     f"score={synthesis_result.sentiment_score}, verdict={synthesis_result.final_verdict}")
+
+        return synthesis_result
+
+    def _build_specialist_prompts(
+        self,
+        context: Dict[str, Any],
+        name: str,
+        enabled_agents: List[str],
+    ) -> Dict[str, str]:
+        """Build focused input prompts for each specialist agent.
+
+        Each specialist gets the stock context but with a narrow focus:
+        - technical: price, indicators, volume, patterns
+        - fundamental: financials, PE/PB, institutional data
+        - news: news content and sentiment signals
+        """
+        code = context.get('code', 'Unknown')
+        today = context.get('today', {})
+
+        prompts = {}
+
+        if "technical" in enabled_agents:
+            prompts["technical"] = self._format_technical_prompt(context, name, code, today)
+
+        if "fundamental" in enabled_agents:
+            prompts["fundamental"] = self._format_fundamental_prompt(context, name, code, today)
+
+        if "news" in enabled_agents:
+            prompts["news"] = self._format_news_prompt(context, name, code)
+
+        return prompts
+
+    def _format_technical_prompt(
+        self, context: Dict[str, Any], name: str, code: str, today: Dict[str, Any]
+    ) -> str:
+        """Build technical analysis prompt for the technical specialist."""
+        prompt = f"""Analyze stock {name}({code}) from a TECHNICAL perspective only.
+
+Price Data:
+- Close: {today.get('close', 'N/A')}, Open: {today.get('open', 'N/A')}
+- High: {today.get('high', 'N/A')}, Low: {today.get('low', 'N/A')}
+- Change: {today.get('pct_chg', 'N/A')}%
+- MA5: {today.get('ma5', 'N/A')}, MA10: {today.get('ma10', 'N/A')}, MA20: {today.get('ma20', 'N/A')}
+- MA Status: {context.get('ma_status', 'N/A')}
+- Volume: {self._format_volume(today.get('volume'))}
+"""
+
+        if 'realtime' in context:
+            rt = context['realtime']
+            prompt += f"""- Volume Ratio: {rt.get('volume_ratio', 'N/A')}
+- Turnover Rate: {rt.get('turnover_rate', 'N/A')}%
+"""
+
+        if 'trend_analysis' in context:
+            t = context['trend_analysis']
+            prompt += f"""- Trend Status: {t.get('trend_status', 'N/A')}
+- Bias MA5: {t.get('bias_ma5', 0):+.2f}%
+- Signal Score: {t.get('signal_score', 0)}/100
+"""
+
+        prompt += """
+Output JSON:
+{"trend": "bullish/bearish/neutral", "key_signals": ["signal1", "signal2"], "support": float, "resistance": float, "score": 0-100, "reasoning": "brief analysis"}"""
+        return prompt
+
+    def _format_fundamental_prompt(
+        self, context: Dict[str, Any], name: str, code: str, today: Dict[str, Any]
+    ) -> str:
+        """Build fundamental analysis prompt for the fundamental specialist."""
+        prompt = f"""Analyze stock {name}({code}) from a FUNDAMENTAL perspective only.
+
+"""
+
+        if 'realtime' in context:
+            rt = context['realtime']
+            prompt += f"""- PE Ratio: {rt.get('pe_ratio', 'N/A')}
+- PB Ratio: {rt.get('pb_ratio', 'N/A')}
+- Market Cap: {self._format_amount(rt.get('total_mv'))}
+"""
+
+        if 'financials' in context:
+            fin = context['financials']
+            if isinstance(fin, dict):
+                for k, v in list(fin.items())[:8]:
+                    prompt += f"- {k}: {v}\n"
+
+        if 'chip' in context:
+            c = context['chip']
+            prompt += f"""- Profit Ratio: {c.get('profit_ratio', 0):.1%}
+- Avg Cost: {c.get('avg_cost', 'N/A')}
+"""
+
+        prompt += """
+Output JSON:
+{"valuation": "undervalued/fair/overvalued", "key_metrics": ["metric1", "metric2"], "risks": ["risk1"], "score": 0-100, "reasoning": "brief analysis"}"""
+        return prompt
+
+    def _format_news_prompt(
+        self, context: Dict[str, Any], name: str, code: str
+    ) -> str:
+        """Build news/sentiment analysis prompt."""
+        prompt = f"""Analyze stock {name}({code}) from a NEWS/SENTIMENT perspective only.
+
+"""
+
+        if 'news' in context:
+            news_data = context['news']
+            if isinstance(news_data, str):
+                prompt += f"Recent News:\n{news_data[:2000]}\n"
+            elif isinstance(news_data, list):
+                for n in news_data[:10]:
+                    prompt += f"- {n}\n"
+
+        if 'market_sentiment' in context:
+            prompt += f"Market Sentiment: {context['market_sentiment']}\n"
+
+        prompt += """
+Output JSON:
+{"sentiment": "positive/negative/neutral", "key_drivers": ["driver1"], "risk_events": ["event1"], "score": 0-100, "reasoning": "brief analysis"}"""
+        return prompt
+
+    def _run_specialist(
+        self,
+        agent_name: str,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> tuple:
+        """Run a single specialist agent with its dedicated system prompt.
+
+        Temporarily overrides self._system_prompt to use the specialist's prompt,
+        then restores it afterward.
+
+        Args:
+            agent_name: Name of the specialist (for logging)
+            system_prompt: The specialist's system prompt
+            user_prompt: The focused input for this specialist
+
+        Returns:
+            Tuple of (parsed_json_dict, raw_response_text)
+        """
+        # Save original system prompt
+        original_prompt = self._system_prompt
+        original_cn_mode = self._cn_mode
+
+        try:
+            self._system_prompt = system_prompt
+            self._cn_mode = False  # Use neutral mode for specialists
+
+            config = get_config()
+            generation_config = {
+                "temperature": min(config.gemini_temperature, 0.5),
+                "max_output_tokens": 2048,
+            }
+
+            start = time.time()
+            response_text = self._call_api_with_retry(user_prompt, generation_config)
+            elapsed = time.time() - start
+
+            logger.debug(f"[DeepAnalyze:{agent_name}] response in {elapsed:.2f}s, {len(response_text)} chars")
+
+            # Parse specialist JSON output
+            parsed = self._parse_specialist_json(response_text, agent_name)
+
+            return parsed, response_text
+
+        finally:
+            # Restore original prompts
+            self._system_prompt = original_prompt
+            self._cn_mode = original_cn_mode
+
+    def _parse_specialist_json(self, response_text: str, agent_name: str) -> Dict[str, Any]:
+        """Parse JSON from a specialist agent's response.
+
+        Falls back to a default dict if parsing fails.
+        """
+        try:
+            cleaned = response_text
+            if '```json' in cleaned:
+                cleaned = cleaned.replace('```json', '').replace('```', '')
+            elif '```' in cleaned:
+                cleaned = cleaned.replace('```', '')
+
+            json_start = cleaned.find('{')
+            json_end = cleaned.rfind('}') + 1
+
+            if json_start >= 0 and json_end > json_start:
+                json_str = cleaned[json_start:json_end]
+                json_str = self._fix_json_string(json_str)
+                return json.loads(json_str)
+
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning(f"[DeepAnalyze:{agent_name}] JSON parse failed: {e}")
+
+        # Fallback: extract score from text
+        return {"score": 50, "reasoning": response_text[:200], "raw": response_text}
+
+    def _synthesize(
+        self,
+        specialist_results: Dict[str, Optional[Dict[str, Any]]],
+        raw_outputs: Dict[str, str],
+        context: Dict[str, Any],
+        name: str,
+        code: str,
+        failed_agents: List[str],
+    ) -> DeepAnalysisResult:
+        """Synthesize specialist outputs into a final DeepAnalysisResult.
+
+        Uses the SYNTHESIZER_PROMPT and calls the LLM to integrate findings.
+        Falls back to simple averaging if synthesizer call fails.
+        """
+        # Build synthesis input
+        synth_input_parts = [f"Synthesize analysis for {name}({code}):\n"]
+
+        for agent_name in ["technical", "fundamental", "news"]:
+            result = specialist_results.get(agent_name)
+            if result:
+                synth_input_parts.append(f"\n### {agent_name.upper()} Report:\n{json.dumps(result, ensure_ascii=False)}")
+            elif agent_name in failed_agents:
+                synth_input_parts.append(f"\n### {agent_name.upper()}: FAILED")
+
+        synth_input = "\n".join(synth_input_parts)
+        synth_input += """
+\nOutput JSON:
+{"final_verdict": "看涨/看跌/中性", "composite_score": 0-100, "sentiment_score": 0-100, "trend_prediction": "强烈看多/看多/震荡/看空/强烈看空", "operation_advice": "买入/加仓/持有/减仓/卖出/观望", "key_catalysts": ["catalyst1"], "risk_factors": ["risk1"], "reasoning": "brief synthesis"}"""
+
+        # Try LLM synthesis
+        try:
+            original_prompt = self._system_prompt
+            self._system_prompt = SYNTHESIZER_PROMPT
+
+            config = get_config()
+            generation_config = {
+                "temperature": min(config.gemini_temperature, 0.5),
+                "max_output_tokens": 2048,
+            }
+
+            synth_text = self._call_api_with_retry(synth_input, generation_config)
+            self._system_prompt = original_prompt
+
+            parsed = self._parse_specialist_json(synth_text, "synthesizer")
+
+            scores = []
+            for an in ["technical", "fundamental", "news"]:
+                r = specialist_results.get(an)
+                if r and isinstance(r, dict):
+                    s = r.get('score', 50)
+                    if isinstance(s, (int, float)):
+                        scores.append(s)
+
+            avg_score = int(sum(scores) / len(scores)) if scores else 50
+
+            return DeepAnalysisResult(
+                code=code,
+                name=name,
+                sentiment_score=int(parsed.get('sentiment_score', avg_score)),
+                trend_prediction=parsed.get('trend_prediction', '震荡'),
+                operation_advice=parsed.get('operation_advice', '观望'),
+                composite_score=int(parsed.get('composite_score', avg_score)),
+                final_verdict=parsed.get('final_verdict', self._score_to_verdict(avg_score)),
+                key_catalysts=parsed.get('key_catalysts', []),
+                risk_factors=parsed.get('risk_factors', []),
+                technical=specialist_results.get('technical'),
+                fundamental=specialist_results.get('fundamental'),
+                news=specialist_results.get('news'),
+                synthesis_text=synth_text,
+                raw_specialist_outputs=raw_outputs,
+                success=True,
+            )
+
+        except Exception as e:
+            logger.warning(f"[DeepAnalyze] Synthesizer failed: {e}, using averaging fallback")
+            return self._synthesize_fallback(
+                specialist_results, raw_outputs, name, code, failed_agents
+            )
+
+    def _synthesize_fallback(
+        self,
+        specialist_results: Dict[str, Optional[Dict[str, Any]]],
+        raw_outputs: Dict[str, str],
+        name: str,
+        code: str,
+        failed_agents: List[str],
+    ) -> DeepAnalysisResult:
+        """Fallback synthesis: average specialist scores when LLM synthesis fails."""
+        scores = []
+        for an in ["technical", "fundamental", "news"]:
+            r = specialist_results.get(an)
+            if r and isinstance(r, dict):
+                s = r.get('score', 50)
+                if isinstance(s, (int, float)):
+                    scores.append(int(s))
+
+        if not scores:
+            return DeepAnalysisResult.error_result(code, name, "所有专家分析失败")
+
+        avg_score = int(sum(scores) / len(scores))
+
+        return DeepAnalysisResult(
+            code=code,
+            name=name,
+            sentiment_score=avg_score,
+            trend_prediction=self._score_to_trend(avg_score),
+            operation_advice=self._score_to_advice(avg_score),
+            composite_score=avg_score,
+            final_verdict=self._score_to_verdict(avg_score),
+            key_catalysts=[],
+            risk_factors=[],
+            technical=specialist_results.get('technical'),
+            fundamental=specialist_results.get('fundamental'),
+            news=specialist_results.get('news'),
+            synthesis_text=f"Fallback averaging (synthesizer failed: {failed_agents})",
+            raw_specialist_outputs=raw_outputs,
+            success=True,
+        )
+
+    def _score_to_verdict(self, score: int) -> str:
+        """Convert numeric score to Chinese verdict."""
+        if score >= 70:
+            return "看涨"
+        elif score >= 40:
+            return "中性"
+        return "看跌"
+
+    def _score_to_trend(self, score: int) -> str:
+        """Convert numeric score to trend prediction."""
+        if score >= 80:
+            return "强烈看多"
+        elif score >= 60:
+            return "看多"
+        elif score >= 40:
+            return "震荡"
+        elif score >= 20:
+            return "看空"
+        return "强烈看空"
+
+    def _score_to_advice(self, score: int) -> str:
+        """Convert numeric score to operation advice."""
+        if score >= 80:
+            return "买入"
+        elif score >= 60:
+            return "加仓"
+        elif score >= 40:
+            return "持有"
+        elif score >= 20:
+            return "减仓"
+        return "卖出"
 
 
 # 便捷函数

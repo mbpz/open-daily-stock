@@ -45,6 +45,18 @@ class ServiceClient:
         """分析股票"""
         return self._send_request("analyze", {"code": code})
 
+    def deep_analyze(self, code: str, agents: Optional[List[str]] = None) -> Dict[str, Any]:
+        """深度分析股票（多 Agent 模式）
+
+        Args:
+            code: 股票代码
+            agents: 启用的专家代理列表，如 ["technical", "fundamental", "news"]
+        """
+        data = {"code": code}
+        if agents:
+            data["deep_analysis_agents"] = ",".join(agents)
+        return self._send_request("deep_analyze", data)
+
     def get_config(self) -> Dict[str, Any]:
         """获取配置"""
         return self._send_request("get_config")

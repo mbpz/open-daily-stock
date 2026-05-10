@@ -156,6 +156,7 @@ class Config:
             "back": "left",
             "toggle_detail": "d",
             "copy_result": "c",
+            "deep_analyze": "ctrl+d",
         },
         "tasks": {
             "cancel": "c",
@@ -213,6 +214,10 @@ class Config:
     # === 行情异动提醒配置 ===
     alerts_enabled: bool = False                  # 是否启用异动提醒
     alerts_threshold_pct: float = 5.0             # 异动阈值百分比
+
+    # === Deep Analysis (P5-5) 多 Agent 配置 ===
+    deep_analysis_enabled: bool = True             # 是否启用深度分析模式
+    deep_analysis_agents: str = "technical,fundamental,news"  # 启用的专家代理（逗号分隔）
 
     # === 流控配置（防封禁关键参数）===
     # Akshare 请求间隔范围（秒）

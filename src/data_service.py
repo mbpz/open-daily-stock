@@ -74,6 +74,7 @@ class DataService:
             "refresh": "_handle_refresh",
             "analyze": "_handle_analyze",
             "analyze_stream": "_handle_analyze_stream",
+            "deep_analyze": "_handle_deep_analyze",
             "get_history": "_handle_get_history",
             "search_news": "_handle_search_news",
             "get_kline_data": "_handle_get_kline_data",
@@ -114,6 +115,8 @@ class DataService:
             "set_language": "_handle_set_language",
             "get_config": "_handle_get_config",
             "update_config": "_handle_update_config",
+            "search_knowledge": "_handle_search_knowledge",
+            "rag_search": "_handle_search_knowledge",
         }
 
         # Simulated trading account
@@ -134,8 +137,8 @@ class DataService:
         self._load_plugins()
 
     def _is_demo_mode(self) -> bool:
-        """Check if the service is running in demo mode."""
-        return self._demo_mode
+        """Check if the service is running in demo mode (reads config live)."""
+        return get_config().is_demo_mode()
 
     def _handle_request(self, req: Dict[str, Any]) -> Dict[str, Any]:
         """根据 action 分发到对应 handler with timeout protection"""
@@ -219,6 +222,20 @@ class DataService:
             get_db().save_sim_account(self._sim_account.to_dict())
         except Exception as e:
             logger.warning(f"持久化模拟账户失败: {e}")
+        # In-app notification
+        if result.get("status") == "ok":
+            try:
+                from src.notification_center import get_notification_center
+                cost = price * shares
+                get_notification_center().notify(
+                    title=f"买入 {name}({code})",
+                    message=f"{shares}股 @{price:.2f}  成本 ¥{cost:,.2f}",
+                    level="success",
+                    category="trade_executed",
+                    action="markets",
+                )
+            except Exception:
+                pass
         return result
 
     def _handle_sim_sell(self, req: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +248,24 @@ class DataService:
             get_db().save_sim_account(self._sim_account.to_dict())
         except Exception as e:
             logger.warning(f"持久化模拟账户失败: {e}")
+        # In-app notification
+        if result.get("status") == "ok":
+            try:
+                from src.notification_center import get_notification_center
+                trade = result.get("trade", {})
+                pnl = trade.get("pnl", 0)
+                name = trade.get("name", code)
+                shares_sold = trade.get("shares", 0)
+                level = "success" if pnl >= 0 else "warning"
+                get_notification_center().notify(
+                    title=f"卖出 {name}({code})",
+                    message=f"{shares_sold}股 @{price:.2f}  盈亏 ¥{pnl:+,.2f}",
+                    level=level,
+                    category="trade_executed",
+                    action="markets",
+                )
+            except Exception:
+                pass
         return result
 
     def _handle_sim_summary(self, req: Dict[str, Any]) -> Dict[str, Any]:
@@ -361,8 +396,20 @@ class DataService:
             except Exception as e:
                 logger.warning(f"Failed to update task_log to done for {task_id}: {e}")
 
-            # 发送通知
+            # 发送外部通知
             self._send_analysis_notification(code, result)
+            # In-app notification
+            try:
+                from src.notification_center import get_notification_center
+                get_notification_center().notify(
+                    title=f"分析完成: {result.name}({code})",
+                    message=f"{result.operation_advice} (评分: {result.sentiment_score})",
+                    level="success",
+                    category="analysis_complete",
+                    action="analyze",
+                )
+            except Exception:
+                pass
 
         except Exception as e:
             logger.error(f"AI 分析失败 [{code}]: {e}")
@@ -386,6 +433,162 @@ class DataService:
             notifier.send(message)
         except Exception as e:
             logger.warning(f"发送分析通知失败: {e}")
+
+    # ============================================================
+    # P5-5: Deep Analysis Handler
+    # ============================================================
+
+    def _handle_deep_analyze(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """Trigger deep multi-agent analysis task.
+
+        Creates a task and runs deep analysis in a background thread.
+        Returns a task_id immediately for async polling.
+        """
+        code = req.get("code")
+        if not code:
+            return {"status": "error", "message": "缺少股票代码 code 参数"}
+
+        enabled_agents_str = req.get("deep_analysis_agents", None)
+        enabled_agents = None
+        if enabled_agents_str:
+            enabled_agents = [a.strip() for a in enabled_agents_str.split(',') if a.strip()]
+
+        # Demo mode: return pre-computed synthetic deep analysis
+        if self._is_demo_mode():
+            task_id = f"deep_demo_{code}_{int(datetime.now().timestamp())}"
+            demo_result = self._build_demo_deep_result(code, enabled_agents)
+            with self._tasks_lock:
+                self._tasks[task_id] = {
+                    "task_id": task_id,
+                    "code": code,
+                    "status": "completed",
+                    "created_at": datetime.now().isoformat(),
+                    "completed_at": datetime.now().isoformat(),
+                    "result": demo_result,
+                    "error": None,
+                }
+            return {
+                "status": "ok",
+                "task_id": task_id,
+                "message": "演示深度分析完成（无需 API Key）",
+                "result": demo_result,
+            }
+
+        task_id = f"deep_{uuid.uuid4().hex[:8]}_{code}_{int(datetime.now().timestamp())}"
+
+        with self._tasks_lock:
+            self._tasks[task_id] = {
+                "task_id": task_id,
+                "code": code,
+                "status": "pending",
+                "created_at": datetime.now().isoformat(),
+                "result": None,
+                "error": None,
+            }
+
+        try:
+            get_db().save_task(task_id, code, "pending")
+            get_db().save_task_log(task_id, "deep_analyze", code, "pending")
+        except Exception:
+            pass
+
+        thread = threading.Thread(
+            target=self._run_deep_analyze_task,
+            args=(task_id, code, enabled_agents),
+        )
+        thread.daemon = True
+        thread.start()
+
+        return {"status": "ok", "task_id": task_id, "message": "深度分析任务已创建"}
+
+    def _run_deep_analyze_task(
+        self, task_id: str, code: str, enabled_agents: Optional[List[str]]
+    ):
+        """Background execution of deep multi-agent analysis."""
+        db = get_db()
+
+        try:
+            with self._tasks_lock:
+                if self._tasks[task_id]["status"] == "cancelled":
+                    return
+                self._tasks[task_id]["status"] = "running"
+
+            db.save_task(task_id, code, "running")
+            try:
+                db.update_task_log(task_id, "running")
+            except Exception:
+                pass
+
+            context = db.get_analysis_context(code)
+
+            from src.analyzer import GeminiAnalyzer
+            analyzer = GeminiAnalyzer()
+            result = analyzer.deep_analyze(context, enabled_agents=enabled_agents)
+
+            with self._tasks_lock:
+                if self._tasks[task_id]["status"] == "cancelled":
+                    return
+                self._tasks[task_id]["status"] = "completed"
+                self._tasks[task_id]["result"] = result.to_dict()
+                self._tasks[task_id]["completed_at"] = datetime.now().isoformat()
+
+            db.save_task(task_id, code, "completed", result_json=json.dumps(result.to_dict()))
+            try:
+                db.update_task_log(task_id, "done", completed_at=datetime.now(),
+                                   result_json=json.dumps(result.to_dict()))
+            except Exception:
+                pass
+
+            self._send_deep_analysis_notification(code, result)
+
+        except Exception as e:
+            logger.error(f"深度分析失败 [{code}]: {e}")
+            with self._tasks_lock:
+                if self._tasks[task_id]["status"] == "cancelled":
+                    return
+                self._tasks[task_id]["status"] = "failed"
+                self._tasks[task_id]["error"] = str(e)
+            db.save_task(task_id, code, "failed", error=str(e))
+            try:
+                db.update_task_log(task_id, "failed", completed_at=datetime.now())
+            except Exception:
+                pass
+
+    def _send_deep_analysis_notification(self, code: str, result):
+        """Send notification for completed deep analysis."""
+        try:
+            from src.notification import NotificationService
+            notifier = NotificationService()
+            name = getattr(result, 'name', code)
+            score = getattr(result, 'composite_score', 50)
+            verdict = getattr(result, 'final_verdict', '中性')
+            message = f"🔬 {name}({code}) 深度分析完成: {verdict} (综合评分: {score})"
+            notifier.send(message)
+        except Exception as e:
+            logger.warning(f"发送深度分析通知失败: {e}")
+
+    def _build_demo_deep_result(self, code: str, enabled_agents: Optional[List[str]]) -> Dict[str, Any]:
+        """Build synthetic demo deep analysis result."""
+        if enabled_agents is None:
+            enabled_agents = ["technical", "fundamental", "news"]
+
+        return {
+            "code": code,
+            "name": f"演示股票{code}",
+            "sentiment_score": 70,
+            "trend_prediction": "看多",
+            "operation_advice": "买入",
+            "composite_score": 70,
+            "final_verdict": "看涨",
+            "key_catalysts": ["演示利好因素1", "演示利好因素2"],
+            "risk_factors": ["演示风险因素1"],
+            "technical": {"trend": "bullish", "key_signals": ["MA金叉", "放量突破"], "support": 1600.0, "resistance": 1800.0, "score": 72},
+            "fundamental": {"valuation": "fair", "key_metrics": ["PE适中", "营收增长"], "risks": ["行业竞争"], "score": 68},
+            "news": {"sentiment": "positive", "key_drivers": ["政策利好"], "risk_events": [], "score": 70},
+            "synthesis_text": "演示模式深度分析 - 综合评分 70，看涨",
+            "success": True,
+            "error_message": None,
+        }
 
     def _handle_analyze_stream(self, req: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1078,6 +1281,19 @@ class DataService:
             from src.backtester import backtest, ma_crossover_strategy
             result = backtest(history_data, initial_capital=initial_capital, strategy_fn=ma_crossover_strategy)
 
+            # In-app notification
+            try:
+                from src.notification_center import get_notification_center
+                get_notification_center().notify(
+                    title=f"回测完成: {code}",
+                    message=f"收益率 {result.total_return:+.2f}%  胜率 {result.win_rate:.1f}%  交易 {result.num_trades}次",
+                    level="info",
+                    category="backtest_complete",
+                    action="strategies",
+                )
+            except Exception:
+                pass
+
             return {
                 "status": "ok",
                 "data": {
@@ -1734,6 +1950,29 @@ class DataService:
 
         return {"status": "ok", "message": f"配置已更新: {key} = {value}"}
 
+    def _handle_search_knowledge(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """P5-6: Search historical analysis knowledge base via FTS5 full-text index.
+
+        Expected request fields:
+            query (required): FTS5 search query string.
+            code (optional): Stock code filter.
+            limit (optional, default 5): Max results to return.
+        """
+        query = req.get("query", "")
+        if not query:
+            return {"status": "error", "message": "缺少 query 参数"}
+
+        code = req.get("code")
+        limit = req.get("limit", 5)
+        try:
+            limit = int(limit)
+        except (ValueError, TypeError):
+            limit = 5
+
+        db = get_db()
+        results = db.search_analyses(query=query, code=code, limit=limit)
+        return {"status": "ok", "results": results}
+
     def _load_plugins(self):
         """根据配置加载外部数据源插件"""
         import importlib
@@ -1843,6 +2082,25 @@ class DataService:
                 logger.warning(f"异动提醒发送失败: {market['code']}")
         except Exception as e:
             logger.error(f"发送异动提醒异常 [{market['code']}]: {e}")
+
+        # In-app notification for price alerts
+        try:
+            from src.notification_center import get_notification_center
+            code = market.get("code", "")
+            name = market.get("name", code)
+            chg = market.get("change_pct", 0)
+            price_val = market.get("price", 0)
+            level = "warning" if abs(chg) > 5 else "info"
+            direction = "上涨" if chg > 0 else "下跌"
+            get_notification_center().notify(
+                title=f"价格异动: {name}({code})",
+                message=f"{direction} {abs(chg):.2f}%  当前价: {price_val:.2f}",
+                level=level,
+                category="price_alert",
+                action="markets",
+            )
+        except Exception:
+            pass
 
     # ============================================================
     # Network Degradation Fallback

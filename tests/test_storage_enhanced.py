@@ -28,15 +28,15 @@ class TestSchemaVersion:
         assert count >= 1
         conn.close()
 
-    def test_schema_version_is_v2(self):
-        """Current schema version should be 2."""
+    def test_schema_version_is_v3(self):
+        """Current schema version should be 3 (P5-6: FTS5 RAG added)."""
         from src.storage import get_db
         db = get_db()
         conn = sqlite3.connect(db._engine.url.database)
         c = conn.cursor()
         c.execute("SELECT MAX(version) FROM schema_version")
         version = c.fetchone()[0]
-        assert version == 2
+        assert version == 3
         conn.close()
 
     def test_schema_version_idempotent(self):
@@ -48,7 +48,7 @@ class TestSchemaVersion:
         conn = sqlite3.connect(db1._engine.url.database)
         c = conn.cursor()
         # Count before re-init
-        c.execute("SELECT COUNT(*) FROM schema_version WHERE version = 2")
+        c.execute("SELECT COUNT(*) FROM schema_version WHERE version = 3")
         count_before = c.fetchone()[0]
 
         # The second get_db should return the same singleton (no re-init)
@@ -58,7 +58,7 @@ class TestSchemaVersion:
         # Trigger a real re-init via reset
         DatabaseManager.reset_instance()
         db3 = get_db()
-        c.execute("SELECT COUNT(*) FROM schema_version WHERE version = 2")
+        c.execute("SELECT COUNT(*) FROM schema_version WHERE version = 3")
         count_after = c.fetchone()[0]
         # Strong idempotency: re-init must not create extra version rows
         assert count_after == count_before, (
@@ -331,19 +331,19 @@ class TestMigrations:
         from src.storage import _run_migrations, get_db
         db = get_db()
         # Should not raise
-        _run_migrations(db, 2, 2)
-        _run_migrations(db, 3, 2)  # from > to => no-op
+        _run_migrations(db, 3, 3)
+        _run_migrations(db, 4, 3)  # from > to => no-op
 
     def test_run_migrations_creates_version_record(self):
         """_run_migrations records a new SchemaVersion row."""
         from src.storage import _run_migrations, get_db, SchemaVersion
         db = get_db()
-        _run_migrations(db, 1, 2)
+        _run_migrations(db, 2, 3)
 
-        # Verify a version 2 record exists (created by migration or earlier)
+        # Verify a version 3 record exists (created by migration or earlier)
         conn = sqlite3.connect(db._engine.url.database)
         c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM schema_version WHERE version = 2")
+        c.execute("SELECT COUNT(*) FROM schema_version WHERE version = 3")
         count = c.fetchone()[0]
         assert count >= 1
         conn.close()

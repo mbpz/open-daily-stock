@@ -20,6 +20,14 @@ from .sparkline import (
 from .keybindings import get_keybinding, get_all_keybindings
 from .theme import DARK_THEME, LIGHT_THEME, get_theme, get_current_theme
 from .i18n import TRANSLATIONS, DEFAULT_LANG, get_current_lang, t, get_available_languages
+from .commands import (
+    CATEGORY_META, COMMANDS,
+    search_commands,
+    find_command,
+    record_recent_command, get_recent_commands,
+    execute_command, register_handler,
+    CommandHandler,
+)
 
 __all__ = [
     "MARKET_UP_COLOR", "MARKET_DOWN_COLOR", "MARKET_NEUTRAL_COLOR", "NEUTRAL_COLOR",
@@ -37,4 +45,8 @@ __all__ = [
     "get_keybinding", "get_all_keybindings",
     "DARK_THEME", "LIGHT_THEME", "get_theme", "get_current_theme",
     "TRANSLATIONS", "DEFAULT_LANG", "get_current_lang", "t", "get_available_languages",
+    "COMMANDS", "CATEGORY_META",
+    "search_commands", "find_command",
+    "record_recent_command", "get_recent_commands",
+    "execute_command", "register_handler", "CommandHandler",
 ]

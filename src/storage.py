@@ -169,7 +169,7 @@ def get_market_cache() -> MarketDataCache:
 Base = declarative_base()
 
 # Current database schema version
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 
 # === Migration System ===
@@ -205,6 +205,11 @@ def _run_migrations(db: 'DatabaseManager', from_version: int, to_version: int) -
         # migrations that require Data Definition Language go here.
         pass
 
+    if from_version < 3 and to_version >= 3:
+        # P5-6: Add FTS5 virtual table for RAG knowledge base
+        _migrate_v3_add_fts5(db)
+        logger.info("Migration v2 -> v3 applied (FTS5 RAG index)")
+
     # Record the new schema version after all migrations succeed
     # Only insert if this version hasn't been recorded yet (idempotent)
     with db.get_session() as session:
@@ -221,6 +226,93 @@ def _run_migrations(db: 'DatabaseManager', from_version: int, to_version: int) -
             logger.info(f"Migration complete. Schema at v{to_version}")
         else:
             logger.debug(f"Schema v{to_version} already recorded, skipping.")
+
+
+def _migrate_v3_add_fts5(db: 'DatabaseManager') -> None:
+    """P5-6: Create FTS5 virtual table and triggers for RAG knowledge base.
+
+    The FTS5 table indexes analysis_history.result_json text for full-text
+    search, enabling the LLM to reference past analyses when generating new ones.
+    """
+    from sqlalchemy import text
+
+    with db.get_session() as session:
+        conn = session.connection()
+        try:
+            # Check if FTS table already exists (idempotent)
+            result = conn.execute(text(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='analysis_fts'"
+            ))
+            if result.fetchone() is not None:
+                logger.info("FTS5 table analysis_fts already exists, skipping creation")
+                session.commit()
+                return
+
+            # Create FTS5 virtual table with content= analysis_history
+            conn.execute(text("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS analysis_fts USING fts5(
+                    code, stock_name, result_text,
+                    content='analysis_history', content_rowid='id'
+                )
+            """))
+            logger.info("Created FTS5 virtual table: analysis_fts")
+
+            # Create triggers to keep FTS index in sync
+            # Check each trigger exists before creating (compatible with older SQLite)
+            for trigger_name, trigger_sql in [
+                ("analysis_fts_ai", """
+                    CREATE TRIGGER analysis_fts_ai AFTER INSERT ON analysis_history BEGIN
+                        INSERT INTO analysis_fts(rowid, code, stock_name, result_text)
+                        VALUES (new.id, new.code,
+                                COALESCE(
+                                    (SELECT json_extract(new.result_json, '$.name')),
+                                    (SELECT json_extract(new.result_json, '$.code')),
+                                    new.code
+                                ),
+                                COALESCE(new.result_json, ''));
+                    END
+                """),
+                ("analysis_fts_ad", """
+                    CREATE TRIGGER analysis_fts_ad AFTER DELETE ON analysis_history BEGIN
+                        INSERT INTO analysis_fts(analysis_fts, rowid, code, stock_name, result_text)
+                        VALUES ('delete', old.id, old.code, '', '');
+                    END
+                """),
+                ("analysis_fts_au", """
+                    CREATE TRIGGER analysis_fts_au AFTER UPDATE ON analysis_history BEGIN
+                        INSERT INTO analysis_fts(analysis_fts, rowid, code, stock_name, result_text)
+                        VALUES ('delete', old.id, old.code, '', '');
+                        INSERT INTO analysis_fts(rowid, code, stock_name, result_text)
+                        VALUES (new.id, new.code,
+                                COALESCE(
+                                    (SELECT json_extract(new.result_json, '$.name')),
+                                    (SELECT json_extract(new.result_json, '$.code')),
+                                    new.code
+                                ),
+                                COALESCE(new.result_json, ''));
+                    END
+                """),
+            ]:
+                existing = conn.execute(text(
+                    "SELECT name FROM sqlite_master WHERE type='trigger' AND name=:name"
+                ), {"name": trigger_name}).fetchone()
+                if existing is None:
+                    conn.execute(text(trigger_sql))
+                    logger.debug(f"Created trigger: {trigger_name}")
+
+            logger.info("Created FTS5 triggers (INSERT/UPDATE/DELETE)")
+
+            # Rebuild index from existing data
+            conn.execute(text(
+                "INSERT INTO analysis_fts(analysis_fts) VALUES ('rebuild')"
+            ))
+            logger.info("Rebuilt FTS5 index from existing analysis_history data")
+
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.warning(f"FTS5 migration v3 failed (non-fatal): {e}")
+            # Don't raise — FTS is an enhancement, not a critical path
 
 
 # === 数据模型定义 ===
@@ -406,6 +498,9 @@ class DatabaseManager:
         if existing_version < CURRENT_SCHEMA_VERSION:
             _run_migrations(self, existing_version, CURRENT_SCHEMA_VERSION)
 
+        # Initialize FTS5 full-text index for RAG knowledge base
+        self._init_fts5()
+
         self._initialized = True
         logger.info(f"数据库初始化完成: {db_url}")
 
@@ -473,6 +568,84 @@ class DatabaseManager:
                     logger.info("Migration: added task_id column to analysis_history")
         except Exception as e:
             logger.warning(f"Migration check failed: {e}")
+
+    def _init_fts5(self):
+        """Create FTS5 full-text index on analysis_history for RAG knowledge base.
+
+        Uses standalone FTS5 mode (not content-sync) because the indexed fields
+        (analysis_summary, trend_analysis, risk_alerts) are extracted from the
+        JSON result_json column via json_extract(). INSERT/UPDATE/DELETE triggers
+        keep the FTS5 index in sync automatically.
+        """
+        from sqlalchemy import text
+        try:
+            with self.get_session() as session:
+                # Drop any pre-existing FTS5 table with wrong schema (e.g. from
+                # earlier content-sync mode that doesn't store these columns).
+                session.execute(text(
+                    "DROP TABLE IF EXISTS analysis_fts"
+                ))
+                # Create standalone FTS5 virtual table (no content= binding;
+                # columns store their own data independently of content table).
+                session.execute(text("""
+                    CREATE VIRTUAL TABLE IF NOT EXISTS analysis_fts USING fts5(
+                        code, analysis_summary, trend_analysis, risk_alerts
+                    )
+                """))
+                # Drop old triggers first (they may reference stale column schemas)
+                session.execute(text(
+                    "DROP TRIGGER IF EXISTS analysis_fts_insert"
+                ))
+                session.execute(text(
+                    "DROP TRIGGER IF EXISTS analysis_fts_delete"
+                ))
+                session.execute(text(
+                    "DROP TRIGGER IF EXISTS analysis_fts_update"
+                ))
+                # Trigger: keep FTS5 in sync on INSERT
+                session.execute(text("""
+                    CREATE TRIGGER IF NOT EXISTS analysis_fts_insert
+                    AFTER INSERT ON analysis_history BEGIN
+                        INSERT INTO analysis_fts(rowid, code, analysis_summary,
+                            trend_analysis, risk_alerts)
+                        VALUES (
+                            new.rowid, new.code,
+                            COALESCE(json_extract(new.result_json, '$.analysis_summary'), ''),
+                            COALESCE(json_extract(new.result_json, '$.trend_analysis'), ''),
+                            COALESCE(json_extract(new.result_json, '$.risk_alerts'), '')
+                        );
+                    END
+                """))
+                # Trigger: keep FTS5 in sync on DELETE
+                session.execute(text("""
+                    CREATE TRIGGER IF NOT EXISTS analysis_fts_delete
+                    AFTER DELETE ON analysis_history BEGIN
+                        INSERT INTO analysis_fts(analysis_fts, rowid, code,
+                            analysis_summary, trend_analysis, risk_alerts)
+                        VALUES ('delete', old.rowid, old.code, '', '', '');
+                    END
+                """))
+                # Trigger: keep FTS5 in sync on UPDATE
+                session.execute(text("""
+                    CREATE TRIGGER IF NOT EXISTS analysis_fts_update
+                    AFTER UPDATE ON analysis_history BEGIN
+                        INSERT INTO analysis_fts(analysis_fts, rowid, code,
+                            analysis_summary, trend_analysis, risk_alerts)
+                        VALUES ('delete', old.rowid, old.code, '', '', '');
+                        INSERT INTO analysis_fts(rowid, code, analysis_summary,
+                            trend_analysis, risk_alerts)
+                        VALUES (
+                            new.rowid, new.code,
+                            COALESCE(json_extract(new.result_json, '$.analysis_summary'), ''),
+                            COALESCE(json_extract(new.result_json, '$.trend_analysis'), ''),
+                            COALESCE(json_extract(new.result_json, '$.risk_alerts'), '')
+                        );
+                    END
+                """))
+                session.commit()
+                logger.info("FTS5 full-text index initialized for analysis_history")
+        except Exception as e:
+            logger.warning(f"FTS5 initialization failed (non-critical): {e}")
 
     def has_today_data(self, code: str, target_date: Optional[date] = None) -> bool:
         """
@@ -939,6 +1112,118 @@ class DatabaseManager:
             ).scalars().all()
             return list(results)
 
+    def search_analyses(
+        self,
+        query: str,
+        code: Optional[str] = None,
+        limit: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """P5-6: Full-text search analysis_history via FTS5.
+
+        Searches the result_json text of past analyses.  Optionally filters
+        by stock code.
+
+        Args:
+            query: FTS5 search query string.
+            code: Optional stock code filter.
+            limit: Maximum number of results (default 5).
+
+        Returns:
+            List of dicts with keys: id, code, stock_name, timestamp,
+            result_json, score (relevance rank).  Returns empty list when
+            the FTS index doesn't exist yet (graceful degradation).
+        """
+        import time as _time
+        from sqlalchemy import text as _text
+
+        t0 = _time.time()
+        try:
+            with self.get_session() as session:
+                conn = session.connection()
+                # Check FTS table exists
+                check = conn.execute(_text(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='analysis_fts'"
+                ))
+                if check.fetchone() is None:
+                    logger.debug("FTS5 table not yet created; returning empty results")
+                    return []
+
+                if code:
+                    sql = _text("""
+                        SELECT rowid AS id, code, stock_name, result_text, rank
+                        FROM analysis_fts
+                        WHERE analysis_fts MATCH :query AND code = :code
+                        ORDER BY rank
+                        LIMIT :limit
+                    """)
+                    rows = conn.execute(sql, {"query": query, "code": code, "limit": limit}).fetchall()
+                else:
+                    sql = _text("""
+                        SELECT rowid AS id, code, stock_name, result_text, rank
+                        FROM analysis_fts
+                        WHERE analysis_fts MATCH :query
+                        ORDER BY rank
+                        LIMIT :limit
+                    """)
+                    rows = conn.execute(sql, {"query": query, "limit": limit}).fetchall()
+
+                results = []
+                for row in rows:
+                    row_id = row[0]
+                    # Fetch timestamp from the content table
+                    ts_result = conn.execute(
+                        _text("SELECT timestamp FROM analysis_history WHERE id = :id"),
+                        {"id": row_id}
+                    ).fetchone()
+                    timestamp = ts_result[0] if ts_result else None
+
+                    results.append({
+                        "id": row_id,
+                        "code": row[1],
+                        "stock_name": row[2],
+                        "result_text": row[3],
+                        "score": row[4],
+                        "timestamp": timestamp.isoformat() if timestamp else None,
+                    })
+
+                elapsed = (_time.time() - t0) * 1000
+                logger.debug(f"FTS search '{query[:50]}' returned {len(results)} results in {elapsed:.1f}ms")
+                return results
+        except Exception as e:
+            logger.warning(f"FTS search failed (non-fatal): {e}")
+            return []
+
+    def rebuild_fts_index(self) -> bool:
+        """P5-6: Rebuild the FTS5 index from the content table.
+
+        Useful after bulk imports or data migrations.  Returns True on
+        success, False when the FTS table doesn't exist yet.
+        """
+        from sqlalchemy import text as _text
+        import time as _time
+
+        t0 = _time.time()
+        try:
+            with self.get_session() as session:
+                conn = session.connection()
+                check = conn.execute(_text(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='analysis_fts'"
+                ))
+                if check.fetchone() is None:
+                    logger.debug("FTS5 table not yet created; cannot rebuild")
+                    return False
+
+                conn.execute(_text(
+                    "INSERT INTO analysis_fts(analysis_fts) VALUES ('rebuild')"
+                ))
+                session.commit()
+                elapsed = (_time.time() - t0) * 1000
+                logger.info(f"FTS5 index rebuilt in {elapsed:.1f}ms")
+                return True
+        except Exception as e:
+            logger.warning(f"FTS5 rebuild failed: {e}")
+            return False
+
     def ensure_schema_version(self) -> int:
         """Ensure schema_version table is populated. Returns current version."""
         with self.get_session() as session:
@@ -1277,6 +1562,89 @@ class DatabaseManager:
             session.commit()
             return True
 
+    # === Notification CRUD ===
+
+    def save_notification(self, title: str, message: str, level: str = "info",
+                          category: str = "system", action: Optional[str] = None) -> Optional[int]:
+        """Add a notification and enforce max 500 stored rows."""
+        with self.get_session() as session:
+            # Enforce max 500 notifications
+            count = session.query(NotificationRecord).count()
+            if count >= 500:
+                # Delete oldest to make room
+                oldest = session.execute(
+                    select(NotificationRecord).order_by(NotificationRecord.created_at).limit(1)
+                ).scalars().first()
+                if oldest:
+                    session.delete(oldest)
+            record = NotificationRecord(
+                title=title, message=message, level=level,
+                category=category, action=action,
+            )
+            session.add(record)
+            session.commit()
+            session.refresh(record)
+            return record.id
+
+    def get_notifications(self, limit: int = 50, category: Optional[str] = None,
+                          unread_only: bool = False) -> List[Dict[str, Any]]:
+        """Get recent notifications, optionally filtered."""
+        with self.get_session() as session:
+            conditions = []
+            if category:
+                conditions.append(NotificationRecord.category == category)
+            if unread_only:
+                conditions.append(NotificationRecord.read == 0)
+            query = select(NotificationRecord).order_by(desc(NotificationRecord.created_at)).limit(limit)
+            if conditions:
+                query = query.where(and_(*conditions))
+            results = session.execute(query).scalars().all()
+            return [r.to_dict() for r in results]
+
+    def get_unread_count(self) -> int:
+        """Return count of unread notifications."""
+        with self.get_session() as session:
+            return session.query(NotificationRecord).filter(
+                NotificationRecord.read == 0
+            ).count()
+
+    def mark_notification_read(self, notification_id: int) -> bool:
+        """Mark a single notification as read."""
+        with self.get_session() as session:
+            record = session.execute(
+                select(NotificationRecord).where(NotificationRecord.id == notification_id)
+            ).scalars().first()
+            if not record:
+                return False
+            record.read = 1
+            session.commit()
+            return True
+
+    def mark_all_notifications_read(self) -> int:
+        """Mark all notifications as read. Returns count updated."""
+        with self.get_session() as session:
+            count = session.execute(
+                select(NotificationRecord).where(NotificationRecord.read == 0)
+            ).scalars().all()
+            updated = len(count)
+            for record in count:
+                record.read = 1
+            session.commit()
+            return updated
+
+    def clear_old_notifications(self, days: int = 7) -> int:
+        """Remove notifications older than `days`. Returns count deleted."""
+        cutoff = datetime.now() - timedelta(days=days)
+        with self.get_session() as session:
+            old = session.execute(
+                select(NotificationRecord).where(NotificationRecord.created_at < cutoff)
+            ).scalars().all()
+            count = len(old)
+            for record in old:
+                session.delete(record)
+            session.commit()
+            return count
+
     # === Simulated Trading Account Persistence ===
 
     def save_sim_account(self, account_data: Optional[Dict]) -> None:
@@ -1558,6 +1926,32 @@ class Alert(Base):
             'enabled': bool(self.enabled),
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class NotificationRecord(Base):
+    """In-app notification record model."""
+    __tablename__ = 'notifications'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String(200), nullable=False)
+    message = Column(String(1000), nullable=False)
+    level = Column(String(20), nullable=False, default='info')
+    category = Column(String(30), nullable=False, default='system')
+    action = Column(String(500))
+    read = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'id': self.id,
+            'title': self.title,
+            'message': self.message,
+            'level': self.level,
+            'category': self.category,
+            'action': self.action,
+            'read': bool(self.read),
+            'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 
 

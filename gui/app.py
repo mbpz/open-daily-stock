@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 
 from gui.theme import get_theme, set_theme as apply_theme, get_current_theme_name
 from src.i18n import _
+from src.notification_center import get_notification_center, Notification
 
 VERSION = "0.2.1"
 from src.service_client import ServiceClient
@@ -44,6 +45,16 @@ class StockApp:
 
         # Initialize task store
         self._task_store = TaskStore()
+
+        # P5-7: Command palette overlay (lazy-init)
+        self._command_palette = None
+
+        # Global keyboard handler for Ctrl+K
+        self.page.on_keyboard_event = self._on_keyboard
+
+        # Notification center
+        self._nc = get_notification_center()
+        self._nc.add_listener(self._on_notification)
 
         self._build_ui()
         self._load_page("markets")
@@ -87,6 +98,10 @@ class StockApp:
                     icon=ft.Icons.STRATEGY,
                     label=_("strategies")
                 ),
+                ft.NavigationRailDestination(
+                    icon=ft.Icons.NOTIFICATIONS,
+                    label=_("通知中心")
+                ),
             ],
             on_change=self._on_nav_change,
         )
@@ -112,7 +127,12 @@ class StockApp:
                 tooltip="配置 API key 后解锁实时 AI 分析",
             )
 
-        # Status bar with version, theme toggle, demo badge, and update button
+        # Status bar with version, theme toggle, demo badge, notification bell, and update button
+        self._notif_bell = ft.IconButton(
+            icon=ft.Icons.NOTIFICATIONS_OUTLINED,
+            on_click=self._open_notifications,
+            tooltip=_("通知中心"),
+        )
         status_controls = [
             ft.Text(f"{_('last_update')}: {self.status_text}",
                     color=theme["TEXT_SECONDARY"], size=14),
@@ -122,6 +142,7 @@ class StockApp:
             status_controls.append(self._demo_badge)
             status_controls.append(ft.Container(width=8))
         status_controls.extend([
+            self._notif_bell,
             self._theme_btn,
             ft.Text(f"v{VERSION}", color=theme["TEXT_SECONDARY"], size=12),
             ft.IconButton(
@@ -130,6 +151,8 @@ class StockApp:
                 tooltip=_("check_update"),
             ),
         ])
+
+        self.update_unread_badge()
 
         self.status_bar = ft.Container(
             content=ft.Row(status_controls),
@@ -188,7 +211,7 @@ class StockApp:
         self._update_status_bar()
 
         # Reload current page with new theme
-        page_names = ["chart", "markets", "analyze", "tasks", "config", "logs", "strategies"]
+        page_names = ["chart", "markets", "analyze", "tasks", "config", "logs", "strategies", "notifications"]
         current_page = page_names[self.nav_index] if self.nav_index < len(page_names) else "markets"
         self._load_page(current_page)
 
@@ -206,6 +229,7 @@ class StockApp:
             status_controls.append(self._demo_badge)
             status_controls.append(ft.Container(width=8))
         status_controls.extend([
+            self._notif_bell,
             self._theme_btn,
             ft.Text(f"v{VERSION}", color=theme["TEXT_SECONDARY"], size=12),
             ft.IconButton(
@@ -218,11 +242,62 @@ class StockApp:
         self.status_bar.bgcolor = theme["PRIMARY_COLOR"]
         self.status_bar.update()
 
+    def _open_notifications(self, e):
+        """Open the notifications page."""
+        self._load_page("notifications")
+
+    def _on_notification(self, notification: Notification):
+        """Handle incoming notification -- show toast in GUI."""
+        try:
+            from gui.pages.toast import show_toast
+            show_toast(self.page, notification)
+        except Exception:
+            pass
+        self.update_unread_badge()
+
+    def update_unread_badge(self):
+        """Update notification bell badge."""
+        try:
+            count = self._nc.get_unread_count()
+            if count > 0:
+                self._notif_bell.icon = ft.Icons.NOTIFICATIONS_ACTIVE
+                self._notif_bell.tooltip = f"通知({count})"
+            else:
+                self._notif_bell.icon = ft.Icons.NOTIFICATIONS_OUTLINED
+                self._notif_bell.tooltip = "通知中心"
+            self._notif_bell.update()
+        except Exception:
+            pass
+
     def _on_nav_change(self, e):
         """Handle navigation rail selection change"""
-        page_names = ["chart", "markets", "analyze", "tasks", "config", "logs", "strategies"]
+        page_names = ["chart", "markets", "analyze", "tasks", "config", "logs", "strategies", "notifications"]
         self.nav_index = e.control.selected_index
         self._load_page(page_names[self.nav_index])
+
+    def _on_keyboard(self, e: ft.KeyboardEvent):
+        """P5-7: Global keyboard handler for Ctrl+K command palette and arrow navigation."""
+        if e.ctrl and e.key.lower() == "k":
+            self._open_command_palette()
+            return
+
+        # Arrow key navigation within command palette
+        if self._command_palette and self._command_palette.is_open:
+            if e.key == "Arrow Down":
+                self._command_palette.select_next()
+            elif e.key == "Arrow Up":
+                self._command_palette.select_prev()
+            elif e.key == "Escape":
+                self._command_palette.close()
+
+    def _open_command_palette(self):
+        """Open or toggle the command palette overlay."""
+        from gui.pages.command_palette import CommandPaletteOverlay
+        if self._command_palette and self._command_palette.is_open:
+            self._command_palette.close()
+            return
+        self._command_palette = CommandPaletteOverlay(self)
+        self._command_palette.open()
 
     def _load_page(self, page_name: str):
         """Load and display the specified page"""
@@ -236,6 +311,7 @@ class StockApp:
             "config": "gui.pages.config",
             "logs": "gui.pages.logs",
             "strategies": "gui.pages.strategies",
+            "notifications": "gui.pages.notifications",
         }
         class_map = {
             "chart": "ChartPage",
@@ -245,6 +321,7 @@ class StockApp:
             "config": "ConfigPage",
             "logs": "LogsPage",
             "strategies": "StrategiesPage",
+            "notifications": "NotificationsPage",
         }
 
         if page_name not in page_map:

@@ -278,6 +278,12 @@ def parse_arguments() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        '--deep',
+        action='store_true',
+        help='使用深度分析模式（多 Agent 协同：技术面+基本面+消息面+综合研判）'
+    )
+
+    parser.add_argument(
         '--version',
         action='version',
         version=f'open-daily-stock {__version__}',

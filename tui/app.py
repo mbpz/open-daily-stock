@@ -1,4 +1,5 @@
 """Main Textual app with module routing."""
+import sys
 import asyncio
 from textual.app import App
 from textual.binding import Binding
@@ -13,12 +14,16 @@ from tui.widgets.analyze import AnalyzeView
 from tui.widgets.config import ConfigView
 from tui.widgets.logs import LogsView
 from tui.widgets.strategies import StrategiesView
+from tui.widgets.notification_center import NotificationCenterPanel
+from tui.widgets.toast import ToastContainer, get_toast_container
 from tui.data.wrapper import DataProviderWrapper
 from tui.data.task_store import TaskStore
 from src.config import get_config
 from src.service_client import ServiceClient
 from src.i18n import _
 from src.shared.theme import get_current_theme
+from src.notification_center import get_notification_center, Notification
+import json
 from typing import Optional
 
 MODULES = [MarketsView, TasksView, AnalyzeView, ConfigView, LogsView, StrategiesView]
@@ -36,6 +41,7 @@ _DEFAULT_KEYBINDINGS = {
     "r": "refresh",
     "?": "help",
     "t": "toggle_theme",
+    "n": "notifications",
 }
 
 # 动作名称 → Textual action 映射
@@ -51,6 +57,7 @@ _ACTION_MAP = {
     "refresh": "refresh",
     "help": "help",
     "toggle_theme": "toggle_theme",
+    "notifications": "notifications",
 }
 
 # 动作名称 → 显示标签
@@ -62,6 +69,7 @@ _ACTION_LABELS = {
     "config": _("配置"),
     "logs": _("日志"),
     "strategies": _("策略"),
+    "notifications": _("通知"),
     "next_module": _("下一模块"),
     "refresh": _("刷新"),
     "help": _("帮助"),
@@ -190,6 +198,16 @@ def _make_analyze_callback(app: 'TUIApp'):
     return on_analyze
 
 
+def _make_deep_analyze_callback(app: 'TUIApp'):
+    """Create the on_deep_analyze callback for AnalyzeView (P5-5)."""
+    def on_deep_analyze(stock_code: str, progress_callback=None):
+        app._task_store.add_task(stock_code)
+        if progress_callback:
+            asyncio.create_task(app._run_deep_analysis_with_progress(stock_code, progress_callback))
+
+    return on_deep_analyze
+
+
 class TUIApp(App):
     CSS = """
     Screen { background: #1a1a2e; }
@@ -219,6 +237,8 @@ class TUIApp(App):
 
         # 构建 BINDINGS
         self.BINDINGS = _build_bindings(self._keybindings)
+        # P5-7: Always add Ctrl+K command palette shortcut
+        self.BINDINGS.append(Binding("ctrl+k", "command_palette", _("命令面板")))
 
         super().__init__()
 
@@ -226,6 +246,7 @@ class TUIApp(App):
         self._current = 0
         self._refresh_task: Optional[asyncio.Task] = None
         self._on_analyze_callback = on_analyze_callback or _make_analyze_callback(self)
+        self._on_deep_analyze_callback = _make_deep_analyze_callback(self)
         self._markets = self._client.get_markets()
         self._dp = DataProviderWrapper(poll_interval=30)
         self._dp.set_stocks(config.stock_list)
@@ -239,6 +260,7 @@ class TUIApp(App):
         self._wizard_completed = False
         self._wizard_skipped = False
         self._help_visible = False
+        self._notifications_visible = False
 
     def _get_theme_css(self) -> str:
         """Get CSS variables for current theme."""
@@ -264,17 +286,27 @@ class TUIApp(App):
         yield Footer(last_update="---", demo_mode=config.is_demo_mode())
         yield MarketsView(self._dp)
         yield TasksView(self._task_store)
-        yield AnalyzeView(self._on_analyze_callback)
+        yield AnalyzeView(self._on_analyze_callback, self._on_deep_analyze_callback)
         yield ConfigView()
         yield LogsView()
         yield StrategiesView(self._client)
         yield HelpPanel(self._close_help, self._keybindings)
+        yield NotificationCenterPanel(self._close_notifications)
+        yield get_toast_container()
 
     def on_mount(self):
         if self._show_wizard and not self._wizard_completed:
             return
         self._apply_theme()
         self._start_polling()
+        # Register toast listener for new notifications
+        self._nc = get_notification_center()
+        self._nc.add_listener(self._on_notification)
+        # Hide notification panel initially
+        self._notifications_panel = self.query_one(NotificationCenterPanel)
+        self._notifications_panel.display = False
+        self._toast_container = self.query_one(ToastContainer)
+        self._toast_container.display = False
 
     def _apply_theme(self):
         """Apply current theme CSS to screen."""
@@ -372,6 +404,11 @@ class TUIApp(App):
     def action_help(self):
         self._toggle_help()
 
+    def action_command_palette(self):
+        """P5-7: Open the command palette modal (Ctrl+K)."""
+        from tui.widgets.command_palette import CommandPalette
+        self.push_screen(CommandPalette(self))
+
     def _toggle_help(self):
         self._help_visible = not self._help_visible
         self.query_one(HelpPanel).display = self._help_visible
@@ -379,6 +416,37 @@ class TUIApp(App):
     def _close_help(self):
         self._help_visible = False
         self.query_one(HelpPanel).display = False
+
+    def action_notifications(self):
+        """Toggle notification center panel."""
+        self._notifications_visible = not self._notifications_visible
+        self._notifications_panel.display = self._notifications_visible
+        if self._notifications_visible:
+            self._notifications_panel._render()
+            self._update_header_badge()
+
+    def _close_notifications(self):
+        self._notifications_visible = False
+        self._notifications_panel.display = False
+        self._update_header_badge()
+
+    def _on_notification(self, notification: Notification):
+        """Handle incoming notification -- show toast."""
+        try:
+            self._toast_container.display = True
+            self._toast_container.show_toast(notification)
+        except Exception:
+            pass
+        self._update_header_badge()
+
+    def _update_header_badge(self):
+        """Update unread count badge in header."""
+        try:
+            header = self.query_one(Header)
+            count = self._nc.get_unread_count()
+            header.set_unread_badge(count)
+        except Exception:
+            pass
 
     async def _run_analysis_with_progress(self, stock_code: str, progress_callback):
         """Run analysis with streaming when WebSocket is available.
@@ -441,3 +509,89 @@ class TUIApp(App):
         except Exception as e:
             if progress_callback:
                 progress_callback("analysis_error", 100, f"{_('错误: ')}{e}")
+
+    # ============================================================
+    # P5-5: Deep Analysis with progress
+    # ============================================================
+
+    async def _run_deep_analysis_with_progress(self, stock_code: str, progress_callback=None):
+        """Run deep multi-agent analysis via WebSocket or pipeline fallback."""
+        from tui.widgets.analyze import AnalyzeView
+        import logging
+        _log = logging.getLogger(__name__)
+
+        analyze_view = self.query_one(AnalyzeView)
+
+        # === Primary: WebSocket ===
+        try:
+            from src.ws_client import WsClient
+            ws = WsClient()
+            await ws.connect()
+
+            if progress_callback:
+                progress_callback("deep_agents", 15, _("技术面分析中..."))
+
+            await ws._ws.send(json.dumps({"action": "deep_analyze", "code": stock_code}))
+            resp = await ws._ws.recv()
+            resp_data = json.loads(resp)
+            await ws.close()
+
+            if resp_data.get("status") == "ok":
+                result = resp_data.get("result")
+                if result:
+                    if progress_callback:
+                        progress_callback("deep_complete", 100, _("深度分析完成"))
+                    analyze_view.finish_deep_analysis(result)
+                    return
+
+                # Poll for task result
+                task_id = resp_data.get("task_id")
+                if task_id:
+                    import asyncio
+                    for i in range(30):
+                        await asyncio.sleep(1)
+                        try:
+                            await ws.connect()
+                            await ws._ws.send(json.dumps({"action": "get_task", "task_id": task_id}))
+                            tr = await ws._ws.recv()
+                            td = json.loads(tr)
+                            await ws.close()
+
+                            if td.get("status") == "ok":
+                                tdata = td.get("data", {})
+                                status = tdata.get("status")
+                                if status == "completed":
+                                    if progress_callback:
+                                        progress_callback("deep_complete", 100, _("深度分析完成"))
+                                    analyze_view.finish_deep_analysis(tdata.get("result", {}))
+                                    return
+                                elif status == "failed":
+                                    analyze_view.finish_deep_error(tdata.get("error", _("未知错误")))
+                                    return
+                            await asyncio.sleep(0.5)
+                        except Exception:
+                            pass
+
+                    analyze_view.finish_deep_error(_("深度分析超时"))
+                    return
+        except Exception as e:
+            _log.info(f"WS deep analysis unavailable ({e}), falling back to pipeline")
+
+        # === Fallback: pipeline via stdio ===
+        from src.core.pipeline import StockAnalysisPipeline
+        try:
+            if progress_callback:
+                progress_callback("deep_pipeline", 20, _("深度分析执行中..."))
+
+            pipeline = StockAnalysisPipeline(progress_callback=progress_callback)
+            result = await asyncio.to_thread(
+                pipeline.analyze_stock_deep, stock_code
+            )
+            if result:
+                if progress_callback:
+                    progress_callback("deep_complete", 100, _("深度分析完成"))
+                analyze_view.finish_deep_analysis(result)
+            else:
+                analyze_view.finish_deep_error(_("分析失败"))
+        except Exception as e:
+            analyze_view.finish_deep_error(str(e))

@@ -5,9 +5,10 @@ from src.i18n import _
 
 
 class AnalyzeView(Static):
-    def __init__(self, on_analyze: callable):
+    def __init__(self, on_analyze: callable, on_deep_analyze: callable = None):
         super().__init__()
         self._on_analyze = on_analyze
+        self._on_deep_analyze = on_deep_analyze
         self._progress_bar = None
         self._progress_text = None
         self._streaming = False
@@ -19,6 +20,7 @@ class AnalyzeView(Static):
         yield Static(_("  输入股票代码: "), id="label")
         yield Input(placeholder="600519, 000001, hk00700, AAPL", id="stock-input")
         yield Button(_("开始分析"), id="analyze-btn")
+        yield Button(_("深度分析"), id="deep-analyze-btn", classes="deep-btn")
         yield Static("", id="verdict-area")
         yield Static("", id="sentiment-bar")
         yield Static("", id="catalysts-area")
@@ -34,6 +36,26 @@ class AnalyzeView(Static):
                 self._on_analyze(stock_code, self._update_progress)
                 self.query_one("#result-area").update(_("分析中...\n"))
                 self._show_progress()
+        elif event.button.id == "deep-analyze-btn":
+            stock_code = self.query_one("#stock-input", Input).value.strip()
+            if stock_code and self._on_deep_analyze:
+                self._on_deep_analyze(stock_code, self._update_progress)
+                self.query_one("#result-area").update(
+                    _("深度分析中...\n[1/4] 技术面分析中...\n[2/4] 基本面分析中...\n[3/4] 消息面分析中...\n[4/4] 综合分析中...\n")
+                )
+                self._show_progress()
+                self._is_deep = True
+
+    def action_deep_analyze(self):
+        """Ctrl+D: 触发深度分析"""
+        stock_code = self.query_one("#stock-input", Input).value.strip()
+        if stock_code and self._on_deep_analyze:
+            self._on_deep_analyze(stock_code, self._update_progress)
+            self.query_one("#result-area").update(
+                _("深度分析中...\n[1/4] 技术面分析中...\n[2/4] 基本面分析中...\n[3/4] 消息面分析中...\n[4/4] 综合分析中...\n")
+            )
+            self._show_progress()
+            self._is_deep = True
 
     def _show_progress(self):
         """显示进度条"""
@@ -226,6 +248,93 @@ class AnalyzeView(Static):
 
         # Details in result area
         self.query_one("#result-area", Static).update(details)
+
+    def finish_deep_analysis(self, result):
+        """Display deep multi-agent analysis result with specialist breakdowns.
+
+        Args:
+            result: DeepAnalysisResult object or dict from the analyzer
+        """
+        self._streaming = False
+        self._stream_buffer = ""
+
+        progress_bar = self.query_one("#progress-bar", ProgressBar)
+        progress_text = self.query_one("#progress-text", Static)
+        progress_bar.visible = False
+        progress_text.update("")
+
+        # Handle both dict and object
+        if isinstance(result, dict):
+            score = result.get("composite_score", result.get("sentiment_score", 50))
+            verdict = result.get("final_verdict", "中性")
+            catalysts = result.get("key_catalysts", [])
+            risks = result.get("risk_factors", [])
+            tech = result.get("technical", {}) or {}
+            fund = result.get("fundamental", {}) or {}
+            news = result.get("news", {}) or {}
+            trend = result.get("trend_prediction", "---")
+            advice = result.get("operation_advice", "---")
+            synthesis = result.get("synthesis_text", "")
+        else:
+            score = getattr(result, 'composite_score', 50)
+            verdict = getattr(result, 'final_verdict', '中性')
+            catalysts = getattr(result, 'key_catalysts', [])
+            risks = getattr(result, 'risk_factors', [])
+            tech = getattr(result, 'technical', {}) or {}
+            fund = getattr(result, 'fundamental', {}) or {}
+            news = getattr(result, 'news', {}) or {}
+            trend = getattr(result, 'trend_prediction', '---')
+            advice = getattr(result, 'operation_advice', '---')
+            synthesis = getattr(result, 'synthesis_text', '')
+
+        # Verdict
+        if score >= 70:
+            verdict_color = "green"
+        elif score >= 40:
+            verdict_color = "yellow"
+        else:
+            verdict_color = "red"
+
+        # Build detail lines with specialist breakdowns
+        lines = [
+            f"{'='*30}",
+            f"  {_('深度分析综合评分')}: {score}/100",
+            f"  {_('最终研判')}: {verdict}",
+            f"  {_('趋势预测')}: {trend}",
+            f"  {_('操作建议')}: {advice}",
+            f"",
+            f"{'='*30}",
+            f"  {_('技术面评分')}: {tech.get('score', 'N/A')}",
+            f"  {_('基本面评分')}: {fund.get('score', 'N/A')}",
+            f"  {_('消息面评分')}: {news.get('score', 'N/A')}",
+        ]
+        if tech.get('trend'):
+            lines.append(f"  {_('技术趋势')}: {tech.get('trend')}")
+        if tech.get('key_signals'):
+            lines.append(f"  {_('技术信号')}: {', '.join(tech.get('key_signals', []))}")
+        if fund.get('valuation'):
+            lines.append(f"  {_('估值水平')}: {fund.get('valuation')}")
+        if fund.get('key_metrics'):
+            lines.append(f"  {_('核心指标')}: {', '.join(fund.get('key_metrics', []))}")
+        if news.get('sentiment'):
+            lines.append(f"  {_('舆情情绪')}: {news.get('sentiment')}")
+        if synthesis:
+            lines.append(f"\n{_('综合研判')}: {synthesis[:500]}")
+
+        details = "\n".join(lines)
+
+        self.set_structured_result(verdict, verdict_color, score,
+                                   catalysts or [], risks or [], details)
+
+    def finish_deep_error(self, message: str):
+        """Display deep analysis error."""
+        self._streaming = False
+        self._stream_buffer = ""
+        progress_bar = self.query_one("#progress-bar", ProgressBar)
+        progress_text = self.query_one("#progress-text", Static)
+        progress_bar.visible = False
+        progress_text.update("")
+        self.query_one("#result-area", Static).update(f"{_('深度分析失败: ')}{message}")
 
     def on_mount(self):
         self.styles.background = "#1a1a2e"
