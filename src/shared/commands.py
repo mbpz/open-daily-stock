@@ -268,7 +268,7 @@ def execute_command(command_id: str, context: Any = None) -> bool:
     Also records the command as recently used.
 
     Returns:
-        True if at least one handler was called, False otherwise.
+        True if at least one handler returned True, False otherwise.
     """
     record_recent_command(command_id)
 
@@ -276,13 +276,14 @@ def execute_command(command_id: str, context: Any = None) -> bool:
     if not handlers:
         return False
 
+    any_matched = False
     for h in handlers:
         try:
             if h(command_id, context):
-                return True
+                any_matched = True
         except Exception:
             pass
-    return False
+    return any_matched
 
 
 # Convenience alias for the command registry

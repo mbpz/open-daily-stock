@@ -620,18 +620,14 @@ class DatabaseManager:
                 session.execute(text("""
                     CREATE TRIGGER IF NOT EXISTS analysis_fts_delete
                     AFTER DELETE ON analysis_history BEGIN
-                        INSERT INTO analysis_fts(analysis_fts, rowid, code,
-                            analysis_summary, trend_analysis, risk_alerts)
-                        VALUES ('delete', old.rowid, old.code, '', '', '');
+                        DELETE FROM analysis_fts WHERE rowid = old.rowid;
                     END
                 """))
                 # Trigger: keep FTS5 in sync on UPDATE
                 session.execute(text("""
                     CREATE TRIGGER IF NOT EXISTS analysis_fts_update
                     AFTER UPDATE ON analysis_history BEGIN
-                        INSERT INTO analysis_fts(analysis_fts, rowid, code,
-                            analysis_summary, trend_analysis, risk_alerts)
-                        VALUES ('delete', old.rowid, old.code, '', '', '');
+                        DELETE FROM analysis_fts WHERE rowid = old.rowid;
                         INSERT INTO analysis_fts(rowid, code, analysis_summary,
                             trend_analysis, risk_alerts)
                         VALUES (
@@ -1133,14 +1129,31 @@ class DatabaseManager:
             result_json, score (relevance rank).  Returns empty list when
             the FTS index doesn't exist yet (graceful degradation).
         """
+        import re as _re
         import time as _time
         from sqlalchemy import text as _text
+
+        def _fts5_safe_query(query: str) -> str:
+            """Prepare a FTS5-compatible query string.
+
+            Adds prefix matching (*) to each token. For Chinese tokens that
+            FTS5 cannot prefix-match (e.g. '盘整' in '高位盘整'), the result
+            will fall back to a LIKE-based secondary search handled by the
+            caller.
+            """
+            tokens = query.split()
+            prefixed = []
+            for token in tokens:
+                if _re.match(r'^[\w一-鿿]+$', token):
+                    prefixed.append(token + '*')
+                else:
+                    prefixed.append(token)
+            return ' '.join(prefixed)
 
         t0 = _time.time()
         try:
             with self.get_session() as session:
                 conn = session.connection()
-                # Check FTS table exists
                 check = conn.execute(_text(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name='analysis_fts'"
                 ))
@@ -1148,24 +1161,61 @@ class DatabaseManager:
                     logger.debug("FTS5 table not yet created; returning empty results")
                     return []
 
+                fts_query = _fts5_safe_query(query)
+
                 if code:
                     sql = _text("""
-                        SELECT rowid AS id, code, stock_name, result_text, rank
+                        SELECT rowid AS id, code, analysis_summary, trend_analysis, risk_alerts, rank
                         FROM analysis_fts
                         WHERE analysis_fts MATCH :query AND code = :code
                         ORDER BY rank
                         LIMIT :limit
                     """)
-                    rows = conn.execute(sql, {"query": query, "code": code, "limit": limit}).fetchall()
+                    rows = conn.execute(sql, {"query": fts_query, "code": code, "limit": limit}).fetchall()
                 else:
                     sql = _text("""
-                        SELECT rowid AS id, code, stock_name, result_text, rank
+                        SELECT rowid AS id, code, analysis_summary, trend_analysis, risk_alerts, rank
                         FROM analysis_fts
                         WHERE analysis_fts MATCH :query
                         ORDER BY rank
                         LIMIT :limit
                     """)
-                    rows = conn.execute(sql, {"query": query, "limit": limit}).fetchall()
+                    rows = conn.execute(sql, {"query": fts_query, "limit": limit}).fetchall()
+
+                # Fallback: if FTS returned no results for a multi-character
+                # Chinese query, try LIKE-based search on the content table.
+                # This handles cases where FTS5 tokenized the content as a single
+                # token (e.g. '高位盘整') and the query token (e.g. '盘整')
+                # cannot match as a prefix.
+                if not rows and len(query.strip()) >= 2 and not any(c in query for c in '*()":'):
+                    like_pattern = f"%{query.replace(' ', '%')}%"
+                    if code:
+                        like_rows = conn.execute(
+                            _text("""
+                                SELECT id AS rowid, code,
+                                    COALESCE(json_extract(result_json, '$.analysis_summary'), '') AS analysis_summary,
+                                    '' AS trend_analysis, '' AS risk_alerts,
+                                    0.0 AS rank
+                                FROM analysis_history
+                                WHERE result_json LIKE :pattern AND code = :code
+                                ORDER BY timestamp DESC LIMIT :limit
+                            """),
+                            {"pattern": like_pattern, "code": code, "limit": limit}
+                        ).fetchall()
+                    else:
+                        like_rows = conn.execute(
+                            _text("""
+                                SELECT id AS rowid, code,
+                                    COALESCE(json_extract(result_json, '$.analysis_summary'), '') AS analysis_summary,
+                                    '' AS trend_analysis, '' AS risk_alerts,
+                                    0.0 AS rank
+                                FROM analysis_history
+                                WHERE result_json LIKE :pattern
+                                ORDER BY timestamp DESC LIMIT :limit
+                            """),
+                            {"pattern": like_pattern, "limit": limit}
+                        ).fetchall()
+                    rows = like_rows
 
                 results = []
                 for row in rows:
@@ -1176,14 +1226,20 @@ class DatabaseManager:
                         {"id": row_id}
                     ).fetchone()
                     timestamp = ts_result[0] if ts_result else None
+                    # Fetch stock name from result_json if available
+                    name_result = conn.execute(
+                        _text("SELECT json_extract(result_json, '$.name') FROM analysis_history WHERE id = :id"),
+                        {"id": row_id}
+                    ).fetchone()
+                    stock_name = name_result[0] if name_result and name_result[0] else ""
 
                     results.append({
                         "id": row_id,
                         "code": row[1],
-                        "stock_name": row[2],
-                        "result_text": row[3],
-                        "score": row[4],
-                        "timestamp": timestamp.isoformat() if timestamp else None,
+                        "stock_name": stock_name,
+                        "result_text": row[2] or "",
+                        "score": row[5] if len(row) > 5 else 0.0,
+                        "timestamp": timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp) if timestamp else None,
                     })
 
                 elapsed = (_time.time() - t0) * 1000
@@ -1213,9 +1269,22 @@ class DatabaseManager:
                     logger.debug("FTS5 table not yet created; cannot rebuild")
                     return False
 
-                conn.execute(_text(
-                    "INSERT INTO analysis_fts(analysis_fts) VALUES ('rebuild')"
-                ))
+                # Clear FTS table and rebuild from content table
+                # (standalone FTS5 tables need manual repopulation; rebuild
+                # command only works with content= binding)
+                conn.execute(_text("DELETE FROM analysis_fts"))
+                conn.execute(_text("""
+                    INSERT INTO analysis_fts(rowid, code, analysis_summary,
+                        trend_analysis, risk_alerts)
+                    SELECT
+                        ah.id,
+                        ah.code,
+                        COALESCE(json_extract(ah.result_json, '$.analysis_summary'), ''),
+                        COALESCE(json_extract(ah.result_json, '$.trend_analysis'), ''),
+                        COALESCE(json_extract(ah.result_json, '$.risk_alerts'), '')
+                    FROM analysis_history ah
+                    WHERE ah.result_json IS NOT NULL
+                """))
                 session.commit()
                 elapsed = (_time.time() - t0) * 1000
                 logger.info(f"FTS5 index rebuilt in {elapsed:.1f}ms")
