@@ -28,7 +28,7 @@ open-daily-stock 是一款面向个人投资者的本地股票分析工具，集
 
 | 产品 | Stars | 部署 | UI | AI 模式 | 策略系统 | 画线 | 机构 | 模拟 |
 |------|:-----:|------|------|----------|:--------:|:----:|:----:|:----:|
-| **open-daily-stock** | — | **PyInstaller 双击** | **TUI+GUI 双模** | LLM 决策 | MA 交叉 | ✅ | ✅ | ✅ |
+| **open-daily-stock** | — | **PyInstaller 双击** | **TUI+GUI 双模** | **多Agent + RAG + 流式** | MA 交叉 | ✅ | ✅ | ✅ |
 | [daily_stock_analysis](https://github.com/ZhuLinsen/daily_stock_analysis) | 34.9K | GH Actions/Fork | Web (Streamlit) | 8+ LLM 多模型 | 11 种 YAML | ❌ | ❌ | ❌ |
 | [vnpy](https://github.com/vnpy/vnpy) | 40.3K | pip install | Qt GUI | ML 因子 | CTA/套利/做市 | ❌ | ❌ | ✅ |
 | [freqtrade](https://github.com/freqtrade/freqtrade) | 50.0K | Docker | Web (React) | FreqAI ML | 完整回测+超参优化 | ❌ | ❌ | ✅ |
@@ -50,17 +50,19 @@ open-daily-stock 是一款面向个人投资者的本地股票分析工具，集
 | **画线工具** | K 线图斐波那契回撤 + 支撑阻力位 | 仅 TradingView 有，开源项目全无 |
 | **模拟交易** | 100 万虚拟账户 | vnpy/freqtrade 有但面向实盘 |
 | **5 渠道通知** | 企微/飞书/Telegram/邮件/Discord | 竞品最多 2 个 |
+| **Command Palette** | Ctrl+K 模糊搜索所有命令 | 开源项目全无 |
+| **通知中心** | 本地 Toast + 通知历史 | 仅 TradingView 有 |
 
 ### AI Agent 赛道对比
 
 | 维度 | open-daily-stock | crewai_stock | llm-stock-team-analyzer | QuantScope |
 |------|:---:|:---:|:---:|:---:|
 | Agent 框架 | 直接 API 调用 | CrewAI | LangGraph | 自研 adapter |
-| Agent 数量 | 1 | 多 (Crew) | 4 (Analyst×3+Trader) | 多 + Quality Gates |
+| Agent 数量 | 4 (技术/基本面/新闻+合成) | 多 (Crew) | 4 (Analyst×3+Trader) | 多 + Quality Gates |
 | Agent 反思 | ❌ | ❌ | ✅ Reflection 节点 | ❌ |
 | MCP 协议 | ✅ stdio bridge | ❌ | ❌ | ✅ |
 | 流式输出 | ✅ | ❌ | ❌ | ❌ |
-| RAG | ❌ | ❌ | ❌ | ✅ pgvector |
+| RAG | ✅ SQLite FTS5 | ❌ | ❌ | ✅ pgvector |
 | 策略 DSL | ❌ | ❌ | ❌ | ❌ |
 
 **定位**: open-daily-stock = 桌面体验最佳的 AI 股票分析工具；daily_stock_analysis = Web 端功能最全的 AI 股票分析平台

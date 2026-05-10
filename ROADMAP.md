@@ -176,20 +176,20 @@ stdio JSON    stdio JSON
 
 ### 即时优先（低工作量高影响）
 
-- [x] **P5-1: Streaming LLM 响应** ✅ — token-by-token 流式输出，感知延迟 8s→1s，35 tests
+- [x] **P5-1: Streaming LLM 响应** ✅ — token-by-token 流式输出，感知延迟 8s→1s，25 tests
 - [x] **P5-2: MCP Server Bridge** ✅ — 37 tools 包装为 MCP Tool，`--mcp` 模式，39 tests
 - [x] **P5-3: Homebrew + winget 分发** ✅ — `brew install` / `winget install`，CI checksums
 - [x] **P5-4: Demo Data 免配置体验** ✅ — 5 只热门股 + K线历史 + AI 样例，25 tests
 
 ### 中期增强
 
-- [ ] **P5-5: Deep Analysis 多 Agent 模式** — 3 并行 specialist agent (技术面/基本面/新闻) + 1 合成 agent
-- [ ] **P5-6: RAG 知识库** — SQLite FTS5 全文索引历史分析，增量增强 LLM 上下文
-- [ ] **P5-7: Command Palette 命令面板** — Ctrl+K 模糊搜索所有 action，统一 TUI/GUI 入口
+- [x] **P5-5: Deep Analysis 多 Agent 模式** ✅ — 3 并行 specialist agent (技术面/基本面/新闻) + 1 合成 agent
+- [x] **P5-6: RAG 知识库** ✅ — SQLite FTS5 全文索引历史分析，LIKE fallback for Chinese
+- [x] **P5-7: Command Palette 命令面板** ✅ — Ctrl+K 模糊搜索所有 action，37 tests
 
 ### 长期探索
 
-- [ ] **P5-8: In-App 通知中心** — 本地 Toast + 通知历史面板
+- [x] **P5-8: In-App 通知中心** ✅ — SQLite notifications 表 + Toast + 通知历史，26 tests
 - [ ] **P5-9: Agentic Research Mode** — LLM 自主决策调用 tools 做多步研究
 - [ ] **P5-10: 因子分析引擎** — Alpha 发现、IC/IR 分析、因子衰减监控
 
