@@ -20,42 +20,50 @@ open-daily-stock 是一款面向个人投资者的本地股票分析工具，集
 | :arrows_counterclockwise: **策略回测** | MA 交叉策略，收益率/最大回撤/夏普比率 |
 | :arrow_down: **一键安装** | PyInstaller 打包，下载即用，自动更新 |
 
-## 竞品对比
+## 竞品对比 (2026-05-10 全量调研)
 
-| 产品 | Stars | 价格 | 本地优先 | TUI+GUI | AI分析 | 策略Agent | 画线 | 机构 | 模拟 |
-|------|:-----:|:----:|:--------:|:-------:|:------:|:---------:|:----:|:----:|:----:|
-| **open-daily-stock** | — | 免费 | ✅ | ✅ 双模 | ✅ | ❌ | ✅ | ✅ | ✅ |
-| [daily_stock_analysis](https://github.com/ZhuLinsen/daily_stock_analysis) | 34K | 免费 | ❌(GH Actions) | ❌ Web | ✅ 8+模型 | ✅ 11种 | ❌ | ❌ | ❌ |
-| 雪球 | — | 免费/付费 | ❌ | ❌ | 基础 | ❌ | ❌ | ✅ | ❌ |
-| 同花顺 | — | 免费/付费 | ❌ | ❌ | 基础 | ❌ | ✅ | ✅ | ❌ |
-| [AI-Kline](https://github.com/QuantMLResearch/AI-Kline) | 325 | 免费 | ✅ | ❌ CMD+Web | ✅ | ❌ | ❌ | ❌ | ❌ |
-| [crewai_stock](https://github.com/liangdabiao/crewai_stock_analysis_system) | 163 | 免费 | ✅ | ❌ Web | ✅ | ✅ 多Agent | ❌ | ❌ | ❌ |
-| TradingView | — | $15/月 | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+基于 GitHub API 搜索 25+ 同类项目，覆盖 6 个赛道。详见 [competitive-analysis.md](docs/superpowers/plans/2026-05-10-competitive-analysis.md)。
 
-**open-daily-stock vs daily_stock_analysis（核心差异）:**
-| 维度 | open-daily-stock | daily_stock_analysis |
-|------|:---:|:---:|
-| 代码规模 | 26 actions | 全功能Web平台 |
-| 独有功能 | TUI、画线、机构追踪、模拟交易 | Agent问股、策略系统、市场复盘 |
-| 部署 | PyInstaller双击运行 | GitHub Actions/Fork即用 |
-| 隐私 | 数据100%不离开本机 | 依赖GitHub Secrets/云端API |
-| 适合 | 技术用户+普通用户 | 有GitHub账号的技术用户 |
+### 核心竞品矩阵
 
-**定位互补：开源AI股票分析的"双雄"**
+| 产品 | Stars | 部署 | UI | AI 模式 | 策略系统 | 画线 | 机构 | 模拟 |
+|------|:-----:|------|------|----------|:--------:|:----:|:----:|:----:|
+| **open-daily-stock** | — | **PyInstaller 双击** | **TUI+GUI 双模** | LLM 决策 | MA 交叉 | ✅ | ✅ | ✅ |
+| [daily_stock_analysis](https://github.com/ZhuLinsen/daily_stock_analysis) | 34.9K | GH Actions/Fork | Web (Streamlit) | 8+ LLM 多模型 | 11 种 YAML | ❌ | ❌ | ❌ |
+| [vnpy](https://github.com/vnpy/vnpy) | 40.3K | pip install | Qt GUI | ML 因子 | CTA/套利/做市 | ❌ | ❌ | ✅ |
+| [freqtrade](https://github.com/freqtrade/freqtrade) | 50.0K | Docker | Web (React) | FreqAI ML | 完整回测+超参优化 | ❌ | ❌ | ✅ |
+| [crewai_stock](https://github.com/liangdabiao/crewai_stock_analysis_system) | 163 | pip | Web (Flask) | CrewAI 多Agent | ❌ | ❌ | ❌ | ❌ |
+| [AI-Kline](https://github.com/QuantMLResearch/AI-Kline) | 325 | CLI | CMD+Web+MCP | LSTM+LLM | ❌ | ❌ | ❌ | ❌ |
+| [llm-stock-team-analyzer](https://github.com/jason8745/llm-stock-team-analyzer) | 33 | Docker | CLI | LangGraph 4-Agent | ❌ | ❌ | ❌ | ❌ |
+| [QuantScope](https://github.com/Kai-dev7/QuantScope) | 22 | Docker | Streamlit+Next.js | Multi-Agent+Quality Gates | ❌ | ❌ | ❌ | ❌ |
+| [AlphaAnalyst](https://github.com/kbhujbal/AlphaAnalyst-open-source-autonomous-equity-research-agent) | 26 | Docker | FastAPI+Next.js | DCF+Peer+RAG | ❌ | ❌ | ❌ | ❌ |
+| 雪球/同花顺 | — | 云端 | 移动+Web | 基础 | ❌ | ✅ | ✅ | ❌ |
+| TradingView | — | 云端 | Web | ❌ | Pine Script | ✅ | ❌ | ✅ |
 
-### PC 客户端竞品对比
+### open-daily-stock 独占优势 (护城河)
 
-| 维度 | open-daily-stock | [vnpy](https://github.com/vnpy/vnpy) 40K★ | [freqtrade](https://github.com/freqtrade/freqtrade) 50K★ |
-|------|:---:|:---:|:---:|
-| GUI | **Flet+Textual 双模** | Qt (PySide6) | Web (React) |
-| 打包 | **PyInstaller 双击运行** | pip install | Docker |
-| 插件架构 | 规划中 | ✅ Gateway | ✅ Plugins |
-| 实盘交易 | ❌ | ✅ | ✅(crypto) |
-| 回测 | MA交叉 | CTA完整 | ✅完整 |
-| AI | **LLM 决策** | ML 因子 | FreqAI ML |
-| 独有 |画线/机构/模拟| CTA/套利/做市 |超参优化/策略|
+| 独有能力 | 说明 | 竞品盲区 |
+|----------|------|----------|
+| **TUI+GUI 双模式** | 同一后端，终端/图形界面自由切换 | 竞品均为单一 UI 模式 |
+| **PyInstaller 双击安装** | 非开发者可用的安装方式 | 竞品需 pip/Docker/GitHub Actions |
+| **机构追踪 + 龙虎榜** | 大股东增减持、机构调研、龙虎榜 | A 股深度功能全部缺失 |
+| **画线工具** | K 线图斐波那契回撤 + 支撑阻力位 | 仅 TradingView 有，开源项目全无 |
+| **模拟交易** | 100 万虚拟账户 | vnpy/freqtrade 有但面向实盘 |
+| **5 渠道通知** | 企微/飞书/Telegram/邮件/Discord | 竞品最多 2 个 |
 
-**open-daily-stock 独占:** TUI+GUI双模式 + 画线工具 + 机构追踪 + 模拟交易，所有竞品均无此组合
+### AI Agent 赛道对比
+
+| 维度 | open-daily-stock | crewai_stock | llm-stock-team-analyzer | QuantScope |
+|------|:---:|:---:|:---:|:---:|
+| Agent 框架 | 直接 API 调用 | CrewAI | LangGraph | 自研 adapter |
+| Agent 数量 | 1 | 多 (Crew) | 4 (Analyst×3+Trader) | 多 + Quality Gates |
+| Agent 反思 | ❌ | ❌ | ✅ Reflection 节点 | ❌ |
+| MCP 协议 | ✅ stdio bridge | ❌ | ❌ | ✅ |
+| 流式输出 | ✅ | ❌ | ❌ | ❌ |
+| RAG | ❌ | ❌ | ❌ | ✅ pgvector |
+| 策略 DSL | ❌ | ❌ | ❌ | ❌ |
+
+**定位**: open-daily-stock = 桌面体验最佳的 AI 股票分析工具；daily_stock_analysis = Web 端功能最全的 AI 股票分析平台
 
 ## Quick Install
 

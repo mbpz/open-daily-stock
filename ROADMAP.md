@@ -319,87 +319,122 @@ open-daily-stock/
 
 ---
 
-## 八、GitHub 竞品深度分析 (2026-05-10)
+## 八、第六轮竞品深度分析 (2026-05-10)
 
-### 8.1 核心发现
+*基于 GitHub API 全量搜索 25+ 仓库，覆盖 6 大赛道，4 维度对比。详见 [competitive-analysis.md](docs/superpowers/plans/2026-05-10-competitive-analysis.md)*
 
-基于 GitHub API 搜索 30+ 个同类项目，识别出唯一直接竞品：**ZhuLinsen/daily_stock_analysis** (34,890 stars)。
+### 8.1 市场全景
 
-### 8.2 竞品对比矩阵
+| 赛道 | 代表项目 | Stars | 核心模式 |
+|------|----------|:-----:|----------|
+| Web 平台型 | daily_stock_analysis, vnpy, freqtrade | 35K-50K | GitHub Actions / Docker / pip |
+| AI Agent 多智能体 | crewai_stock, llm-stock-team-analyzer, QuantScope, AlphaAnalyst | 20-160 | CrewAI / LangGraph + Web UI |
+| CMD+Web 混合 | AI-Kline | 325 | CMD + Web + MCP |
+| 量化平台 | TradeMaster, AlphaSuite | 200-2.7K | ML/RL 策略平台 |
+| 个人开发者 | value-investing-ai-agent, stock-assist, StockAgent | 2-16 | 单一功能实验 |
+| **独占赛道** | **open-daily-stock** | — | **TUI+GUI双模 + 桌面打包 + 机构+画线+模拟** |
 
-| 维度 | open-daily-stock | daily_stock_analysis | AI-Kline | crewai_stock |
-|------|:---:|:---:|:---:|:---:|
-| Stars | — | 34,890 | 325 | 163 |
-| UI | TUI+GUI | Streamlit Web | CMD+Web+MCP | Streamlit |
-| AI模型 | 2 | 8+ | 2 | CrewAI Agents |
-| 策略系统 | MA交叉 | 11种(缠论/波浪/...) | LSTM预测 | 多Agent |
-| Agent对话 | ❌ | ✅ 多轮策略问答 | ❌ | ✅ 多Agent |
-| 部署 | PyInstaller | GH Actions/Docker/API | CLI | Streamlit |
-| MCP协议 | ❌ | ❌ | ✅ | ❌ |
-| Web UI | ❌ | ✅ Streamlit | ✅ | ✅ Streamlit |
-| 画线工具 | ✅ | ❌ | ❌ | ❌ |
-| 机构追踪 | ✅ | ❌ | ❌ | ❌ |
-| 模拟交易 | ✅ | ❌ | ❌ | ❌ |
-| 隐私(纯本地) | ✅ | ❌(GH Actions) | ✅ | ❌ |
+### 8.2 核心竞品架构拆解
 
-### 8.3 独占优势
-
-> open-daily-stock = 唯一提供 **TUI+GUI双模式 + 本地打包 + 画线工具 + 机构追踪 + 模拟交易** 的开源股票分析工具
-
-### 8.4 新增任务 (P5 - GitHub竞品驱动)
-
-- [ ] **P5-1: AI 模型扩展** — 支持 Claude/DeepSeek/通义千问/Ollama（参考 daily_stock_analysis）
-- [ ] **P5-2: Streamlit Web UI** — 添加第三种界面入口 `python main.py --web`
-- [ ] **P5-3: MCP 协议支持** — Model Context Protocol Server，Claude Code 直接调用分析（参考 AI-Kline）
-- [ ] **P5-4: Agent 多轮策略对话** — 技术面/基本面/新闻/风险多Agent协作
-- [ ] **P5-5: 策略系统扩展** — 10+种内置策略（均线/缠论/波浪/情绪周期/Regime）
-- [ ] **P5-6: FastAPI 服务模式** — HTTP REST API 替代纯 stdio JSON
-- [ ] **P5-7: Docker 部署支持** — Dockerfile + docker-compose
-- [ ] **P5-8: 市场每日复盘** — 自动生成市场概览/涨跌统计/板块强弱
-- [ ] **P5-9: GitHub Actions 定时模板** — Fork即用的零成本自动化部署
-- [ ] **P5-10: 多语言 README** — English + 繁體中文版本
-
-### 8.5 优先实施路线
+#### daily_stock_analysis (34.9K★) — 最直接竞品
 
 ```
-本周: P5-1(AI模型扩展) + P5-2(Web UI) + P5-3(MCP协议)
-2周:  P5-6(FastAPI) + P5-7(Docker) + P5-4(Agent对话)
-1月:  P5-5(策略系统) + P5-8(市场复盘)
-持续: P5-9(GH Actions) + P5-10(多语言文档)
+src/
+├── agent/          ← 自研 Agent Framework (orchestrator/executor/memory/skills/tools)
+├── core/           ← backtest_engine, market_profile, market_review, pipeline
+├── strategies/     ← 11 种 YAML 策略 (bull_trend, dragon_head, emotion_cycle, chan_theory...)
+├── bot/            ← Telegram/Discord/微信 Bot 双向交互
+├── data/           ← 多数据源聚合
+└── notification/   ← 多渠道推送
 ```
 
+**启示**: Agent Framework 深度 + 策略 DSL + Bot 交互 是核心差异化
+
+#### llm-stock-team-analyzer (33★) — 最清晰的 Agent 架构
+
+```
+llm_stock_team_analyzer/
+├── agents/
+│   ├── analysts/     ← 技术分析 Agent
+│   ├── researchers/  ← 新闻研究 Agent
+│   ├── trader/       ← 交易决策 Agent
+│   └── utils/
+├── graph/
+│   ├── trading_graph.py   ← LangGraph StateGraph 主图
+│   ├── conditional_logic.py
+│   ├── propagation.py
+│   ├── reflection.py       ← 自反思节点
+│   └── signal_processing.py
+└── dataflows/
+```
+
+**启示**: LangGraph 多 Agent + 反思循环 是 AI 分析深度方向
+
+#### QuantScope (22★) — 最完整的 AI-Native 平台
+
+```
+tradingagents/
+├── agents/        ← 多 Agent 定义
+├── graph/         ← Agent 编排图
+├── skills/        ← Agent 技能库
+├── tools/         ← 工具集
+├── quality_gates/ ← 质量门禁
+├── llm_adapters/  ← 多模型适配
+└── mcp_servers/   ← MCP 协议支持
+```
+
+**启示**: Quality Gates + Skills 注册 + MCP 是生产级 Agent 必备
+
+### 8.3 功能 Gap 矩阵
+
+| 竞品能力 | daily_stock | crewai_stock | llm-team | QuantScope | vnpy | freqtrade | **我们应该做?** |
+|----------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| 策略 YAML DSL | ✅ 11种 | ❌ | ❌ | ❌ | ✅ | ✅ | **P6-1** |
+| 多 Agent 分工 | ✅ Orchestrator | ✅ CrewAI | ✅ LangGraph | ✅ | ❌ | ❌ | **P6-2** |
+| Bot 双向交互 | ✅ 微信/Discord | ❌ | ❌ | ❌ | ❌ | ✅ Telegram | **P6-3** |
+| 市场复盘日报 | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | **P6-4** |
+| RAG 知识增强 | ❌ | ❌ | ❌ | ✅ pgvector | ❌ | ❌ | **P6-5** |
+| Agent 反思循环 | ❌ | ❌ | ✅ Reflection | ❌ | ❌ | ❌ | P6-6 |
+| 插件架构 | ❌ | ❌ | ❌ | ❌ | ✅ Gateway | ✅ Plugins | P7-1 |
+| 策略超参优化 | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ Hyperopt | P7-2 |
+| 实时图表引擎 | ❌ | ❌ | ❌ | ❌ | ✅ pyqtgraph | ✅ Web | 已有 mplfinance |
+| 事件驱动总线 | ❌ | ❌ | ❌ | ❌ | ✅ EventBus | ❌ | P7-3 |
+
+### 8.4 open-daily-stock 护城河 (竞品均不具备)
+
+| 独有能力 | 竞品盲区 |
+|----------|----------|
+| TUI+GUI 双模式 | 竞品均为单一 UI 模式 |
+| PyInstaller 双击安装 | 竞品需 pip/Docker/GitHub Actions |
+| 机构追踪 + 龙虎榜 | A 股深度功能全部缺失 |
+| 画线工具 (斐波那契/支撑阻力) | 仅 TradingView 有，开源无 |
+| 模拟交易 | vnpy/freqtrade 有但面向实盘 |
+| 5 渠道通知 | 竞品最多 2 个 |
+
+### 8.5 新增任务 P6 — 竞争力强化
+
+- [ ] **P6-1: 策略配置系统** — `strategies/` YAML DSL + 策略注册表（对标 daily_stock 11策略）
+- [ ] **P6-2: 多 Agent 分析架构** — LangGraph 4-Agent (技术/基本面/新闻/合成)（对标 llm-stock-team-analyzer）
+- [ ] **P6-3: Bot/IM 双向交互** — Telegram/企业微信 Bot 命令查行情/触发分析（对标 daily_stock/freqtrade）
+- [ ] **P6-4: 市场复盘日报** — 自动生成市场概况/热点板块/涨跌统计 + LLM 摘要（对标 daily_stock）
+- [ ] **P6-5: RAG 历史知识增强** — SQLite FTS5 / ChromaDB 检索历史分析增强上下文（对标 QuantScope）
+- [ ] **P6-6: Agent 反思循环** — 分析结果自检 + 矛盾检测 + 置信度校准（对标 llm-stock-team-analyzer reflection）
+
+### 8.6 新增任务 P7 — 生态建设
+
+- [ ] **P7-1: 插件架构** — 数据源/通知渠道/AI 模型统一可插拔接口（对标 vnpy Gateway）
+- [ ] **P7-2: 策略超参优化** — Optuna 集成自动寻优（对标 freqtrade Hyperopt）
+- [ ] **P7-3: EventBus 事件驱动** — 模块异步解耦，替代硬编码 handler（对标 vnpy EventBus）
+- [ ] **P7-4: 策略社区** — 策略导入/导出 + GitHub 社区模板仓库
+- [ ] **P7-5: Docker 镜像** — Dockerfile + docker-compose（可选，非默认部署方式）
+
+### 8.7 非目标 (明确不做)
+
+- ❌ 实盘交易接口 — 法律风险 + 维护成本极高
+- ❌ Pine Script 兼容 — 语法复杂，维护成本高
+- ❌ Docker 作为默认部署 — 与"双击运行"定位矛盾
+- ❌ 纯 Web SaaS — 与本地优先架构矛盾
+- ❌ 加密货币 — 受众不同，分散精力
+
 ---
----
-
-## 九、PC 客户端竞品分析 (2026-05-10)
-
-### 9.1 核心发现
-
-对比 vnpy(40K★)/freqtrade(50K★)/QUANTAXIS(10K★)/backtrader(21K★) 四大PC客户端项目：
-
-| 维度 | open-daily-stock | vnpy | freqtrade | backtrader |
-|------|:---:|:---:|:---:|:---:|
-| GUI | Flet+Textual 双模 | Qt (PySide6) | Web (React) | CLI only |
-| 打包 | PyInstaller | pip install | Docker | pip |
-| 插件架构 | ❌ | ✅ Gateway | ✅ Plugins | 数据源 |
-| 事件驱动 | ❌ | ✅ EventBus | ❌ | ❌ |
-| 实盘交易 | ❌ | ✅ | ✅(crypto) | ❌ |
-| 回测 | MA 基础 | ✅ CTA | ✅ 完整 | ✅ 完整 |
-| 实时图表 | mplfinance | pyqtgraph | Web | ❌ |
-| 策略系统 | ❌ | CTA/套利/做市 | Python 策略类 | Strategy 类 |
-| AI | LLM 决策 | ML 因子 | FreqAI ML | ❌ |
-| 测试数 | ~300 | ~1000 | ~2000 | ~1500 |
-
-### 9.2 新增任务 (P6 - PC客户端竞品驱动)
-
-- [ ] **P6-1: Gateway 插件架构** — 数据源/通知渠道/AI模型统一可插拔接口（借鉴 vnpy）
-- [ ] **P6-2: EventBus 事件驱动** — 替代硬编码 handler，模块异步解耦（借鉴 vnpy）
-- [ ] **P6-3: 策略系统升级** — 策略基类+参数化+超参优化（借鉴 freqtrade backtrader）
-- [ ] **P6-4: 实时图表引擎** — GUI模式下 pyqtgraph 实时K线（借鉴 vnpy）
-- [ ] **P6-5: RPC 远程服务** — DataService `--rpc` 模式 + REST + WebSocket（借鉴 freqtrade）
-- [ ] **P6-6: Docker 官方镜像** — Dockerfile + docker-compose + Docker Hub（借鉴 freqtrade）
-- [ ] **P6-7: 测试体系建设** — 目标 500+ tests，覆盖率 > 80%（借鉴 freqtrade）
-- [ ] **P6-8: 策略社区** — 策略导入/导出 + GitHub 社区仓库（借鉴 freqtrade）
-
----
-*最后更新: 2026-05-10 — P0-P4 全部完成, P5/P6 新增*
+*最后更新: 2026-05-10 — P0-P5 全部完成 (P5-1~4), P6/P7 新增*
