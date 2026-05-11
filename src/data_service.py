@@ -119,6 +119,12 @@ class DataService:
             "update_config": "_handle_update_config",
             "search_knowledge": "_handle_search_knowledge",
             "rag_search": "_handle_search_knowledge",
+            # P5-10: Factor Analysis Engine
+            "get_factor_value": "_handle_get_factor_value",
+            "analyze_factor_ic": "_handle_analyze_factor_ic",
+            "get_factor_rankings": "_handle_get_factor_rankings",
+            # P5-9: Agentic Research Mode
+            "research": "_handle_research",
         }
 
         # Simulated trading account
@@ -2026,6 +2032,152 @@ class DataService:
         db = get_db()
         results = db.search_analyses(query=query, code=code, limit=limit)
         return {"status": "ok", "results": results}
+
+    # ============================================================
+    # P5-10: Factor Analysis Engine Handlers
+    # ============================================================
+
+    def _handle_get_factor_value(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """Get factor value for a single stock.
+
+        Request params:
+            code (required): Stock code
+            factor_name (required): Factor name (pe_ratio, pb_ratio, momentum_5d,
+                                    momentum_20d, volume_ratio, ma_golden_cross, rsi_14)
+        """
+        code = req.get("code")
+        factor_name = req.get("factor_name")
+
+        if not code:
+            return {"status": "error", "message": "缺少 code 参数"}
+        if not factor_name:
+            return {"status": "error", "message": "缺少 factor_name 参数"}
+
+        try:
+            from src.factor_engine import get_factor_engine
+            engine = get_factor_engine()
+            value = engine.get_factor_value(code, factor_name)
+            return {"status": "ok", "code": code, "factor_name": factor_name, "value": value}
+        except Exception as e:
+            logger.error(f"get_factor_value failed [{code}/{factor_name}]: {e}")
+            return {"status": "error", "message": str(e)}
+
+    def _handle_analyze_factor_ic(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze factor IC/IR and decay metrics.
+
+        Request params:
+            factor_name (required): Factor name to analyze
+            start_date (optional): Analysis start date (ISO string)
+            end_date (optional): Analysis end date (ISO string)
+        """
+        factor_name = req.get("factor_name")
+        if not factor_name:
+            return {"status": "error", "message": "缺少 factor_name 参数"}
+
+        from datetime import date as date_class
+        start_date = req.get("start_date")
+        end_date = req.get("end_date")
+
+        if start_date:
+            try:
+                start_date = date_class.fromisoformat(start_date)
+            except ValueError:
+                return {"status": "error", "message": f"无效的 start_date: {start_date}"}
+        if end_date:
+            try:
+                end_date = date_class.fromisoformat(end_date)
+            except ValueError:
+                return {"status": "error", "message": f"无效的 end_date: {end_date}"}
+
+        try:
+            from src.factor_engine import get_factor_engine
+            engine = get_factor_engine()
+            result = engine.analyze_factor_ic(factor_name, start_date, end_date)
+            return {"status": "ok", "data": result}
+        except Exception as e:
+            logger.error(f"analyze_factor_ic failed [{factor_name}]: {e}")
+            return {"status": "error", "message": str(e)}
+
+    def _handle_get_factor_rankings(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """Get factor rankings across all stocks.
+
+        Request params:
+            factor_name (required): Factor name to rank
+            date (optional): Ranking date (ISO string), defaults to today
+            top_n (optional): Number of top stocks to return (default 50)
+        """
+        factor_name = req.get("factor_name")
+        if not factor_name:
+            return {"status": "error", "message": "缺少 factor_name 参数"}
+
+        from datetime import date as date_class
+        ranking_date = req.get("date")
+        if ranking_date:
+            try:
+                ranking_date = date_class.fromisoformat(ranking_date)
+            except ValueError:
+                return {"status": "error", "message": f"无效的 date: {ranking_date}"}
+
+        top_n = req.get("top_n", 50)
+        try:
+            top_n = int(top_n)
+        except (ValueError, TypeError):
+            top_n = 50
+
+        try:
+            from src.factor_engine import get_factor_engine
+            engine = get_factor_engine()
+            rankings = engine.get_factor_rankings(factor_name, ranking_date, top_n)
+            return {"status": "ok", "factor_name": factor_name, "rankings": rankings}
+        except Exception as e:
+            logger.error(f"get_factor_rankings failed [{factor_name}]: {e}")
+            return {"status": "error", "message": str(e)}
+
+    def _handle_research(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """P5-9: Agentic research mode - LLM-controlled multi-step research.
+
+        Request params:
+            code (required): Stock code
+            topic (required): Research topic/question
+            max_iterations (optional): Max tool-call iterations (default 5)
+        """
+        code = req.get("code")
+        topic = req.get("topic")
+        if not code or not topic:
+            return {"status": "error", "message": "缺少 code 或 topic 参数"}
+
+        max_iterations = req.get("max_iterations", 5)
+        try:
+            max_iterations = int(max_iterations)
+        except (ValueError, TypeError):
+            max_iterations = 5
+
+        try:
+            from src.agents.research_agent import ResearchAgent
+            agent = ResearchAgent(max_iterations=max_iterations)
+            report = agent.research(code, topic, context={"stock_name": req.get("name", code)})
+            return {
+                "status": "ok",
+                "code": report.code,
+                "topic": report.topic,
+                "tool_calls": report.tool_calls,
+                "duration_seconds": report.duration_seconds,
+                "steps": [
+                    {
+                        "iteration": s.iteration,
+                        "thinking": s.thinking,
+                        "action": s.action,
+                        "observation": s.observation,
+                        "is_final": s.is_final,
+                    }
+                    for s in report.steps
+                ],
+                "final_report": report.final_report,
+                "timestamp": report.timestamp,
+            }
+        except Exception as e:
+            logger.error(f"research failed [{code}]: {e}")
+            return {"status": "error", "message": str(e)}
 
     def _load_plugins(self):
         """根据配置加载外部数据源插件"""
