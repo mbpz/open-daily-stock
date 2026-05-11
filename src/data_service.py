@@ -51,9 +51,7 @@ class DataService:
 
     def __init__(self):
         self._running = True
-        self._db_path = ".open-daily-stock.db"
-        self._init_db()
-        # Initialize database via storage.py (ensures schema tables exist)
+        # Initialize database via storage.py (ensures all schema tables exist)
         get_db()
         self._alert_service = AlertService()
 
@@ -1667,54 +1665,6 @@ class DataService:
             return {"status": "error", "message": str(e)}
 
     # === Existing Helper Methods ===
-
-    def _init_db(self):
-        """Initialize DataService's legacy SQLite database (for backward compat).
-
-        Creates the legacy markets/positions/schema_version tables.
-        Note: storage.py manages the main application DB (stock_daily, analysis_history).
-        """
-        conn = sqlite3.connect(self._db_path)
-        c = conn.cursor()
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS markets (
-                code TEXT PRIMARY KEY,
-                name TEXT,
-                price REAL,
-                change_pct REAL,
-                volume INTEGER,
-                updated_at TEXT
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS positions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                code TEXT NOT NULL,
-                name TEXT NOT NULL,
-                shares REAL NOT NULL,
-                buy_price REAL NOT NULL,
-                buy_date TEXT NOT NULL,
-                current_price REAL,
-                created_at TEXT,
-                updated_at TEXT
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS schema_version (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                version INTEGER NOT NULL,
-                applied_at TEXT,
-                description TEXT
-            )
-        """)
-        # Record schema version if not present
-        c.execute("SELECT COUNT(*) FROM schema_version")
-        if c.fetchone()[0] == 0:
-            c.execute("INSERT INTO schema_version (version, applied_at, description) VALUES (?, ?, ?)",
-                       (2, datetime.now().isoformat(), "Initial schema v2"))
-            logger.info("Schema version set to v2")
-        conn.commit()
-        conn.close()
 
     def _send(self, data: Dict[str, Any]):
         """发送 JSON 到 stdout"""

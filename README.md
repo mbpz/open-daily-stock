@@ -77,14 +77,15 @@ python main.py --dry-run          # 仅获取数据
 ┌─────────────────────────────────────────────────────────────┐
 │  用户启动 main.py                                            │
 │  ↓                                                           │
-│  主进程自动 fork DataService (后端守护进程)                   │
-│  ↓ ↓                                                         │
-│  TUI 子进程        GUI 子进程                                │
-│  (终端界面)        (Flet 图形界面)                           │
-│      ↓                ↓                                      │
-│  stdio JSON 通信    stdio JSON 通信                           │
-│      ↓                ↓                                      │
-│  ←─── DataService (子进程守护, 26+ actions) ───→              │
+│  ┌─ python main.py --gui ──┐  ┌─ python main.py --tui ──┐  │
+│  │   GUI 独立进程            │  │   TUI 独立进程           │  │
+│  │   (Flet 图形界面)         │  │   (Textual 终端界面)     │  │
+│  │         ↓                 │  │         ↓                │  │
+│  │   ServiceClient          │  │   ServiceClient          │  │
+│  │   (子进程 stdio)         │  │   (子进程 stdio)         │  │
+│  └──────────┬────────────────┘  └──────────┬────────────────┘  │
+│             ↓                              ↓                   │
+│  ←──────── DataService (子进程守护, 30 actions) ────→         │
 │       ├── 行情拉取 (AkShare/YFinance)                        │
 │       ├── AI 分析 (Gemini + OpenAI, 流式输出)                │
 │       ├── 多 Agent 协同 (技术/基本面/新闻+合成)               │
@@ -98,6 +99,12 @@ python main.py --dry-run          # 仅获取数据
 │       └── SQLite 持久化                                      │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**进程关系：**
+- `main.py` 是唯一入口，根据 `--gui` / `--tui` 决定启动哪个 UI
+- GUI 和 TUI 各自由 `gui/main.py` / `tui/main.py` 直接启动（独立进程）
+- 两个 UI 通过 `ServiceClient`（子进程 stdio JSON）与 DataService 通信
+- `python main.py` 无参数时：启动 DataService 子进程后执行 CLI 完整分析 + 推送
 
 ## 项目结构
 
