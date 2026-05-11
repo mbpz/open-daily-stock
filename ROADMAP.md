@@ -190,8 +190,8 @@ stdio JSON    stdio JSON
 ### 长期探索
 
 - [x] **P5-8: In-App 通知中心** ✅ — SQLite notifications 表 + Toast + 通知历史，26 tests
-- [ ] **P5-9: Agentic Research Mode** — LLM 自主决策调用 tools 做多步研究
-- [ ] **P5-10: 因子分析引擎** — Alpha 发现、IC/IR 分析、因子衰减监控
+- [x] **P5-9: Agentic Research Mode** ✅ — ResearchAgent + LLM tool-calling loop，LLM 自主决策多步研究
+- [x] **P5-10: 因子分析引擎** ✅ — 6 因子 (PE/PB/momentum/volume/MA/RSI)，IC/IR 分析
 
 ### 非目标
 

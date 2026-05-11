@@ -459,7 +459,8 @@ JSON格式回复（不要加markdown）：
 
         # Build report from steps
         lines = [f"# {code} 研究报告: {topic}", ""]
-        lines.append(f"**研究耗时**: {steps[-1].iteration} 轮工具调用", "")
+        lines.append(f"**研究耗时**: {steps[-1].iteration} 轮工具调用")
+        lines.append("")
 
         for step in steps:
             lines.append(f"## 第 {step.iteration} 轮: {step.action}")
