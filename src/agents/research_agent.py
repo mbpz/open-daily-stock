@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional, Callable
 from enum import Enum
 
 from src.storage import get_db
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
@@ -501,38 +502,38 @@ JSON格式回复（不要加markdown）：
         """Persist research report to SQLite."""
         try:
             db = get_db()
-            # Ensure research_logs table exists
-            conn = db._engine.connect()
-            conn.execute(db.text("""
-                CREATE TABLE IF NOT EXISTS research_logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    code TEXT NOT NULL,
-                    topic TEXT NOT NULL,
-                    steps_json TEXT NOT NULL,
-                    final_report TEXT NOT NULL,
-                    tool_calls INTEGER NOT NULL,
-                    duration_seconds REAL NOT NULL,
-                    timestamp TEXT NOT NULL
+            with db.get_session() as session:
+                session.execute(
+                    text("""
+                        CREATE TABLE IF NOT EXISTS research_logs (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            code TEXT NOT NULL,
+                            topic TEXT NOT NULL,
+                            steps_json TEXT NOT NULL,
+                            final_report TEXT NOT NULL,
+                            tool_calls INTEGER NOT NULL,
+                            duration_seconds REAL NOT NULL,
+                            timestamp TEXT NOT NULL
+                        )
+                    """)
                 )
-            """))
-            conn.execute(
-                db.text("""
-                    INSERT INTO research_logs
-                    (code, topic, steps_json, final_report, tool_calls, duration_seconds, timestamp)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """),
-                (
-                    report.code,
-                    report.topic,
-                    json.dumps([asdict(s) for s in report.steps], ensure_ascii=False),
-                    report.final_report,
-                    report.tool_calls,
-                    report.duration_seconds,
-                    report.timestamp,
-                ),
-            )
-            conn.commit()
-            conn.close()
+                session.execute(
+                    text("""
+                        INSERT INTO research_logs
+                        (code, topic, steps_json, final_report, tool_calls, duration_seconds, timestamp)
+                        VALUES (:code, :topic, :steps_json, :final_report, :tool_calls, :duration_seconds, :timestamp)
+                    """),
+                    {
+                        "code": report.code,
+                        "topic": report.topic,
+                        "steps_json": json.dumps([asdict(s) for s in report.steps], ensure_ascii=False),
+                        "final_report": report.final_report,
+                        "tool_calls": report.tool_calls,
+                        "duration_seconds": report.duration_seconds,
+                        "timestamp": report.timestamp,
+                    },
+                )
+                session.commit()
         except Exception as e:
             logger.warning(f"[ResearchAgent] Failed to save report: {e}")
 
