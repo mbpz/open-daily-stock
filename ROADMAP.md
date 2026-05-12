@@ -1,53 +1,45 @@
 # open-daily-stock Roadmap
 
-**项目定位：** 本地 PC 端 TUI + GUI 双模式应用，无需服务端，打包后双击即可使用所有功能。
+**项目定位：** 本地 PC 端 GUI 应用，无需服务端，打包后双击即可使用所有功能。
 
 ---
 
-## 一、TUI/GUI 双模式（核心架构）
-
-| 模式 | 入口 | 说明 |
-|------|------|------|
-| GUI | `python main.py --gui` | Flet 图形界面，普通用户推荐 |
-| TUI | `python main.py --tui` | Textual 终端界面，开发者/技术用户 |
+## 一、架构概览
 
 ```
-main.py (唯一入口)
+open-daily-stock (GUI)
     ↓
 自动 fork DataService (后端守护进程)
-    ↓ ↓
-TUI 子进程    GUI 子进程
-stdio JSON    stdio JSON
-    ↓            ↓
-←──── DataService (统一后端, 30 actions) ────→
+    ↓
+←── DataService (30 actions) ──→
 ```
 
 ---
 
 ## 二、已完成功能总览
 
-| 功能模块 | TUI | GUI | 来源 |
-|---------|:---:|:---:|------|
-| A股/港股/美股实时行情 | ✅ | ✅ | P0 |
-| AI 分析（Gemini + OpenAI，流式输出） | ✅ | ✅ | P5-1 |
-| 多 Agent 协同分析（技术/基本面/新闻+合成） | ✅ | ✅ | P5-5 |
-| RAG 知识库（FTS5 全文检索） | ✅ | ✅ | P5-6 |
-| Command Palette（Ctrl+K 模糊搜索） | ✅ | ✅ | P5-7 |
-| 通知中心（Toast + 历史记录） | ✅ | ✅ | P5-8 |
-| Agentic Research（LLM 自主多步研究） | ✅ | ✅ | P5-9 |
-| 因子分析引擎（PE/PB/momentum/volume/MA/RSI） | ✅ | ✅ | P5-10 |
-| 持仓管理 | ✅ | ✅ | P1-4 |
-| K线回放 | ✅ | ✅ | P1-5 |
-| 机构追踪（股东/调研/龙虎榜） | ✅ | ✅ | P1-6 |
-| 策略回测（MA 交叉） | ✅ | ✅ | P1-7 |
-| 模拟交易（100万虚拟账户） | ✅ | ✅ | P4-2 |
-| 画线工具（斐波那契/支撑阻力） | ✅ | ✅ | P4-1 |
-| 财务报表 | ✅ | ✅ | P4-3 |
-| Sparkline 迷你图 | ✅ | ✅ | P4-4 |
-| 5 渠道通知（企微/飞书/TG/邮件/Discord） | ✅ | ✅ | P0 |
-| MCP Server（stdio JSON-RPC 2.0） | ✅ | ✅ | P5-2 |
-| 多语言（zh_CN/en/ja_JP/ko_KR） | ✅ | ✅ | P2-3 |
-| 主题切换（深色/浅色） | ✅ | ✅ | P2-2 |
+| 功能模块 | 状态 | 来源 |
+|---------|:----:|------|
+| A股/港股/美股实时行情 | ✅ | P0 |
+| AI 分析（Gemini + OpenAI，流式输出） | ✅ | P5-1 |
+| 多 Agent 协同分析（技术/基本面/新闻+合成） | ✅ | P5-5 |
+| RAG 知识库（FTS5 全文检索） | ✅ | P5-6 |
+| Command Palette（Ctrl+K 模糊搜索） | ✅ | P5-7 |
+| 通知中心（Toast + 历史记录） | ✅ | P5-8 |
+| Agentic Research（LLM 自主多步研究） | ✅ | P5-9 |
+| 因子分析引擎（PE/PB/momentum/volume/MA/RSI） | ✅ | P5-10 |
+| 持仓管理 | ✅ | P1-4 |
+| K线回放 | ✅ | P1-5 |
+| 机构追踪（股东/调研/龙虎榜） | ✅ | P1-6 |
+| 策略回测（MA 交叉） | ✅ | P1-7 |
+| 模拟交易（100万虚拟账户） | ✅ | P4-2 |
+| 画线工具（斐波那契/支撑阻力） | ✅ | P4-1 |
+| 财务报表 | ✅ | P4-3 |
+| Sparkline 迷你图 | ✅ | P4-4 |
+| 5 渠道通知（企微/飞书/TG/邮件/Discord） | ✅ | P0 |
+| MCP Server（stdio JSON-RPC 2.0） | ✅ | P5-2 |
+| 多语言（zh_CN/en/ja_JP/ko_KR） | ✅ | P2-3 |
+| 主题切换（深色/浅色） | ✅ | P2-2 |
 
 ---
 
@@ -126,7 +118,6 @@ stdio JSON    stdio JSON
 
 | 组件 | 技术 |
 |------|------|
-| TUI 框架 | Textual |
 | GUI 框架 | Flet >= 0.25 |
 | 数据获取 | AkShare、YFinance |
 | AI 分析 | Gemini / OpenAI 兼容 API + 多 Agent + 流式 |
@@ -141,13 +132,13 @@ stdio JSON    stdio JSON
 
 ```
 open-daily-stock/
-├── main.py                 # 唯一主入口
+├── main.py                 # 主入口（GUI）
 ├── src/
 │   ├── data_service.py     # 后端守护进程（30 actions）
 │   ├── analyzer.py         # AI 分析器（流式）
 │   ├── agents/             # 多 Agent 协同 [P5-5]
 │   │   ├── technical.py    # 技术面 Agent
-│   │   ├── fundamental.py   # 基本面 Agent
+│   │   ├── fundamental.py  # 基本面 Agent
 │   │   ├── news.py         # 新闻 Agent
 │   │   ├── synthesizer.py  # 合成 Agent
 │   │   └── research_agent.py # Agentic Research [P5-9]
@@ -165,10 +156,8 @@ open-daily-stock/
 │   ├── institutional.py    # 机构追踪 [P1-6]
 │   ├── backtester.py       # 回测引擎 [P1-7]
 │   ├── notify/             # 通知渠道 [P0-2]
-│   │   └── channels/       # wechat/feishu/telegram/email/discord
+│   │   └── channels/      # wechat/feishu/telegram/email/discord
 │   └── search_pkg/         # 搜索模块 [P0-3]
-├── tui/                    # TUI 界面（Textual）
-│   └── widgets/            # Markets/Analyze/Tasks/Config/Logs/Kline
 ├── gui/                    # GUI 界面（Flet）
 │   └── pages/             # Markets/Analyze/Tasks/Config/Logs/Kline
 └── tests/                 # 287+ 测试
@@ -184,7 +173,6 @@ open-daily-stock/
 |----------|:---:|:---:|:---:|:---:|
 | 安装方式 | PyInstaller 双击 | 云端 | Web | GitHub Actions |
 | 本地数据 | ✅ 全部本地 | ❌ 云端 | ❌ 云端 | ❌ 云端 |
-| TUI 终端 | ✅ | ❌ | ❌ | ❌ |
 | 机构追踪 | ✅ | ✅ | ❌ | ❌ |
 | 画线工具 | ✅ | ✅ | ✅ | ❌ |
 | 模拟交易 | ✅ | ❌ | ✅ | ❌ |
@@ -217,7 +205,8 @@ open-daily-stock/
 - ❌ Pine Script 兼容 — 维护成本高
 - ❌ Docker 默认部署 — 与"双击运行"矛盾
 - ❌ 纯 Web SaaS — 与本地优先矛盾
+- ❌ TUI/CLI 模式 — 已移除，专注 GUI 体验
 
 ---
 
-*最后更新: 2026-05-11 — P0-P5 全部完成 ✅ (P5-1~P5-10, 287+ tests)*
+*最后更新: 2026-05-12 — 去 TUI，专注文档 GUI ✅*

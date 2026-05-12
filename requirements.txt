@@ -43,9 +43,6 @@ dingtalk-stream >= 0.24.3    # 钉钉 Stream SDK
 # Discord 机器人
 discord.py>=2.0.0              # Discord 机器人开发库
 
-# TUI
-textual>=0.1.0                 # Textual TUI framework
-
 # WebSocket IPC (P3-9)
 websockets>=12.0                # WebSocket server for remote DataService access
 
