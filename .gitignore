@@ -52,6 +52,7 @@ env/
 # 数据和日志
 data/
 !tui/data/
+!gui/data/
 logs/
 reports/
 *.db

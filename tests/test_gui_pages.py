@@ -13,33 +13,9 @@ except ImportError:
 
 pytestmark = pytest.mark.skipif(not flet_available, reason="flet not installed")
 
-from tui.data.task_store import TaskStore
-from tui.data.wrapper import DataProviderWrapper, MarketData
-
 
 class TestMarketsPage:
     """Tests for MarketsPage widget"""
-
-    @pytest.fixture
-    def mock_data_provider(self):
-        """Create mock DataProviderWrapper with no data"""
-        dp = MagicMock(spec=DataProviderWrapper)
-        dp.get_data.return_value = {}
-        dp.fetch_all = AsyncMock()
-        dp.get_last_update.return_value = None
-        return dp
-
-    @pytest.fixture
-    def mock_data_provider_with_data(self):
-        """Create mock DataProviderWrapper with sample data"""
-        dp = MagicMock(spec=DataProviderWrapper)
-        dp.get_data.return_value = {
-            "000001": MarketData("000001", "平安银行", 12.50, 0.85, "15.2万"),
-            "600519": MarketData("600519", "贵州茅台", 1680.00, -1.25, "3.2万"),
-        }
-        dp.fetch_all = AsyncMock()
-        dp.get_last_update.return_value = "10:30:00"
-        return dp
 
     @pytest.fixture
     def mock_app(self):
@@ -50,30 +26,26 @@ class TestMarketsPage:
         app.update_status = MagicMock()
         return app
 
-    def test_markets_page_empty_initialization(self, mock_app, mock_data_provider):
+    def test_markets_page_empty_initialization(self, mock_app):
         """test_markets_page_empty_initialization - MarketsPage with no data initializes correctly"""
         from gui.pages.markets import MarketsPage
-        page = MarketsPage(mock_app, mock_data_provider)
-        # Content is built in __init__, access via .content
+        page = MarketsPage(mock_app, None)
         control = page.content
         assert control is not None
         # Table should exist with columns but no rows
         assert page.table is not None
         assert len(page.table.rows) == 0
 
-    def test_markets_page_with_data(self, mock_app, mock_data_provider_with_data):
+    def test_markets_page_with_data(self, mock_app):
         """test_markets_page_with_data - MarketsPage displays data"""
         from gui.pages.markets import MarketsPage
         markets = [
             {'code': '600519', 'name': '贵州茅台', 'price': 1690.0, 'change': 0.6, 'volume': '1000万'},
             {'code': '000001', 'name': '平安银行', 'price': 12.5, 'change': 0.85, 'volume': '1500万'},
         ]
-        page = MarketsPage(mock_app, mock_data_provider_with_data)
-        # Content is built in __init__
+        page = MarketsPage(mock_app, None)
         page.content
-        # Manually load data to test _load_data
         page._load_data(markets)
-        # Should have rows
         assert len(page.table.rows) == 2
 
 
@@ -83,6 +55,7 @@ class TestTasksPage:
     @pytest.fixture
     def task_store(self):
         """Create TaskStore with sample tasks"""
+        from gui.data.task_store import TaskStore
         store = TaskStore()
         store.add_task("600519")
         store.add_task("000001")

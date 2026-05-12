@@ -12,7 +12,7 @@ from src.notification_center import get_notification_center, Notification
 
 VERSION = "0.2.1"
 from src.service_client import ServiceClient
-from tui.data.task_store import TaskStore
+from gui.data.task_store import TaskStore
 from src.config import get_config
 
 
