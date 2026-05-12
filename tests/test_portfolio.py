@@ -305,10 +305,12 @@ class TestPositionPersistence:
 
     def test_positions_table_exists(self):
         from src.data_service import DataService
+        from src.storage import get_db
         import sqlite3
         service = DataService()
-        # Check if positions table exists
-        conn = sqlite3.connect(service._db_path)
+        db = get_db()
+        db_path = db._engine.url.database
+        conn = sqlite3.connect(db_path)
         c = conn.cursor()
         c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='positions'")
         result = c.fetchone()

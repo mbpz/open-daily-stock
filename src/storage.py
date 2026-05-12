@@ -1931,12 +1931,15 @@ class Market(Base):
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
+        volume_val = self.volume
+        if isinstance(volume_val, bytes):
+            volume_val = int.from_bytes(volume_val, byteorder='little')
         return {
             'code': self.code,
             'name': self.name,
             'price': self.price,
             'change_pct': self.change_pct,
-            'volume': self.volume,
+            'volume': volume_val,
             'volume_display': format_volume_display(self.volume, self.code),
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
