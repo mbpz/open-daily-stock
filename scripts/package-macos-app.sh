@@ -41,7 +41,7 @@ cat > "$CONTENTS/Info.plist" <<'EOF'
     <key>CFBundleDisplayName</key>
     <string>Open Daily Stock</string>
     <key>CFBundleIdentifier</key>
-    <string>com.opendailystock.gui</string>
+    <string>com.opendailystock.app</string>
     <key>CFBundleVersion</key>
     <string>__VERSION__</string>
     <key>CFBundleShortVersionString</key>
@@ -63,8 +63,16 @@ EOF
 # 替换版本号
 sed -i '' "s/__VERSION__/$VERSION/g" "$CONTENTS/Info.plist"
 
-# 3. 创建 DMG
-DMG_NAME="dist/open-daily-stock-gui-$VERSION-macos.dmg"
+# 3. Ad-hoc 签名（满足 ARM 运行要求）
+echo "==> Applying ad-hoc code signature..."
+codesign --force --deep --sign - "$BUNDLE_PATH"
+
+# 验证签名
+echo "==> Verifying signature..."
+codesign --verify --verbose "$BUNDLE_PATH"
+
+# 4. 创建 DMG
+DMG_NAME="dist/open-daily-stock-gui-${VERSION}-macos.dmg"
 SPARSE="dist/rw.temp.dmg"
 
 if ! command -v create-dmg &> /dev/null; then
@@ -72,7 +80,7 @@ if ! command -v create-dmg &> /dev/null; then
     brew install create-dmg
 fi
 
-# 使用 hdiutil 创建简单的 DMG
+# 使用 hdiutil 创建 DMG
 hdiutil create "$SPARSE" \
     -volname "Open Daily Stock" \
     -fs HFS+ \
@@ -90,4 +98,25 @@ hdiutil detach /Volumes/temp_dmg
 hdiutil convert "$SPARSE" -format UDZO -o "$DMG_NAME"
 rm -f "$SPARSE"
 
+# 5. 清除 quarantine xattr（绕过 Gatekeeper 安装弹窗）
+echo "==> Clearing quarantine xattr..."
+xattr -rc "$DMG_NAME"
+
+# 6. 计算 SHA256（用于 Homebrew Cask）
+echo "==> Computing SHA256..."
+ARM_DMG="dist/open-daily-stock-gui-${VERSION}-macos-arm64.dmg"
+INTEL_DMG="dist/open-daily-stock-gui-${VERSION}-macos.dmg"
+
+if [ -f "$ARM_DMG" ]; then
+    ARM_SHA=$(shasum -a 256 "$ARM_DMG" | awk '{print $1}')
+    echo "ARM64 SHA256: $ARM_SHA"
+fi
+
+INTEL_SHA=$(shasum -a 256 "$INTEL_DMG" | awk '{print $1}')
+echo "Intel SHA256: $INTEL_SHA"
+
+echo ""
 echo "Done! DMG created: $DMG_NAME"
+echo "Replace in Cask:"
+echo "  arm:   \"$ARM_SHA\","
+echo "  intel: \"$INTEL_SHA\","

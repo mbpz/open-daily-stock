@@ -1,12 +1,11 @@
 # Homebrew Tap for open-daily-stock
 
-Install open-daily-stock via Homebrew on macOS.
+Install the open-daily-stock GUI app on macOS via Homebrew Cask.
 
 ## Install
 
 ```bash
-brew tap mbpz/tap
-brew install open-daily-stock
+brew install --cask mbpz/tap/open-daily-stock
 ```
 
 ## Upgrade
@@ -18,11 +17,18 @@ brew upgrade open-daily-stock
 ## Uninstall
 
 ```bash
-brew uninstall open-daily-stock
+brew uninstall --cask open-daily-stock
 brew untap mbpz/tap
 ```
 
 ## Requirements
 
-- macOS 12+ (Monterey or later)
-- Python 3.12+ (Homebrew manages this automatically)
+- macOS 10.15+ (Catalina or later)
+- Apple Silicon (M1/M2/M3) or Intel
+
+## Notes
+
+- Installs to `/Applications/open-daily-stock-gui.app`
+- `auto_updates true` — checks GitHub Releases for new versions
+- DMG is signed and quarantine xattr cleared — no Gatekeeper popup
+- Cask is maintained in [mbpz/homebrew-tap](https://github.com/mbpz/homebrew-tap)

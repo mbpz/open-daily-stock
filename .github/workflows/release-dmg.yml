@@ -1,4 +1,4 @@
-name: Release DMG
+name: Release DMG + Homebrew Cask
 
 on:
   push:
@@ -6,10 +6,16 @@ on:
       - 'v*'
 
 jobs:
-  build-dmg:
-    runs-on: macos-latest
+  # =========================================================
+  # Build arm64 on macOS 14 (Apple Silicon)
+  # =========================================================
+  build-arm64:
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -17,35 +23,228 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install pyinstaller textual flet>=0.25.0
+        run: pip install pyinstaller textual flet>=0.25.0
 
-      - name: Run packaging script
+      - name: Build GUI executable
+        run: pyinstaller gui/open-daily-stock.spec
+
+      - name: Create arm64 .app Bundle
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          CONTENTS="dist/arm64/open-daily-stock-gui.app/Contents"
+          mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
+          cp "dist/open-daily-stock-gui" "$CONTENTS/MacOS/"
+
+          cat > "$CONTENTS/Info.plist" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key><string>open-daily-stock-gui</string>
+              <key>CFBundleDisplayName</key><string>Open Daily Stock</string>
+              <key>CFBundleIdentifier</key><string>com.opendailystock.app</string>
+              <key>CFBundleVersion</key><string>VERSION_PLACEHOLDER</string>
+              <key>CFBundleShortVersionString</key><string>VERSION_PLACEHOLDER</string>
+              <key>CFBundleExecutable</key><string>open-daily-stock-gui</string>
+              <key>CFBundlePackageType</key><string>APPL</string>
+              <key>LSMinimumSystemVersion</key><string>10.15</string>
+              <key>NSHighResolutionCapable</key><true/>
+              <key>NSPrincipalClass</key><string>NSApplication</string>
+          </dict>
+          </plist>
+          EOF
+          sed -i '' "s/VERSION_PLACEHOLDER/$VERSION/g" "$CONTENTS/Info.plist"
+
+      - name: Ad-hoc sign arm64 .app
+        run: |
+          codesign --force --deep --sign - "dist/arm64/open-daily-stock-gui.app"
+          codesign --verify --verbose "dist/arm64/open-daily-stock-gui.app"
+
+      - name: Create arm64 DMG
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          hdiutil create dist/rw-arm64.dmg \
+            -volname "Open Daily Stock" -fs HFS+ -size 200m -layout NONE
+          hdiutil attach dist/rw-arm64.dmg -mountpoint /Volumes/temp_dmg -nobrowse
+          cp -R dist/arm64/open-daily-stock-gui.app /Volumes/temp_dmg/
+          hdiutil detach /Volumes/temp_dmg
+          hdiutil convert dist/rw-arm64.dmg -format UDZO \
+            -o "dist/open-daily-stock-gui-${VERSION}-macos-arm64.dmg"
+          rm -f dist/rw-arm64.dmg
+
+      - name: Clear quarantine
+        run: xattr -rc "dist/open-daily-stock-gui-${VERSION}-macos-arm64.dmg"
+
+      - name: Set arm64 SHA output
+        id: sha
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SHA=$(shasum -a 256 "dist/open-daily-stock-gui-${VERSION}-macos-arm64.dmg" | awk '{print $1}')
+          echo "arm_sha=$SHA"
+          echo "arm_sha=$SHA" >> $GITHUB_OUTPUT
+
+      - name: Upload arm64 DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: dmg-arm64
+          path: dist/open-daily-stock-gui-${{ github.ref_name }}-macos-arm64.dmg
+          retention-days: 30
+
+  # =========================================================
+  # Build x64 on macOS 13 (Intel)
+  # =========================================================
+  build-x64:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install pyinstaller textual flet>=0.25.0
+
+      - name: Build GUI executable
+        run: pyinstaller gui/open-daily-stock.spec
+
+      - name: Create x64 .app Bundle
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          CONTENTS="dist/x64/open-daily-stock-gui.app/Contents"
+          mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
+          cp "dist/open-daily-stock-gui" "$CONTENTS/MacOS/"
+
+          cat > "$CONTENTS/Info.plist" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key><string>open-daily-stock-gui</string>
+              <key>CFBundleDisplayName</key><string>Open Daily Stock</string>
+              <key>CFBundleIdentifier</key><string>com.opendailystock.app</string>
+              <key>CFBundleVersion</key><string>VERSION_PLACEHOLDER</string>
+              <key>CFBundleShortVersionString</key><string>VERSION_PLACEHOLDER</string>
+              <key>CFBundleExecutable</key><string>open-daily-stock-gui</string>
+              <key>CFBundlePackageType</key><string>APPL</string>
+              <key>LSMinimumSystemVersion</key><string>10.15</string>
+              <key>NSHighResolutionCapable</key><true/>
+              <key>NSPrincipalClass</key><string>NSApplication</string>
+          </dict>
+          </plist>
+          EOF
+          sed -i '' "s/VERSION_PLACEHOLDER/$VERSION/g" "$CONTENTS/Info.plist"
+
+      - name: Ad-hoc sign x64 .app
+        run: |
+          codesign --force --deep --sign - "dist/x64/open-daily-stock-gui.app"
+          codesign --verify --verbose "dist/x64/open-daily-stock-gui.app"
+
+      - name: Create x64 DMG
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          hdiutil create dist/rw-x64.dmg \
+            -volname "Open Daily Stock" -fs HFS+ -size 200m -layout NONE
+          hdiutil attach dist/rw-x64.dmg -mountpoint /Volumes/temp_dmg -nobrowse
+          cp -R dist/x64/open-daily-stock-gui.app /Volumes/temp_dmg/
+          hdiutil detach /Volumes/temp_dmg
+          hdiutil convert dist/rw-x64.dmg -format UDZO \
+            -o "dist/open-daily-stock-gui-${VERSION}-macos.dmg"
+          rm -f dist/rw-x64.dmg
+
+      - name: Clear quarantine
+        run: xattr -rc "dist/open-daily-stock-gui-${VERSION}-macos.dmg"
+
+      - name: Set x64 SHA output
+        id: sha
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SHA=$(shasum -a 256 "dist/open-daily-stock-gui-${VERSION}-macos.dmg" | awk '{print $1}')
+          echo "intel_sha=$SHA"
+          echo "intel_sha=$SHA" >> $GITHUB_OUTPUT
+
+      - name: Upload x64 DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: dmg-x64
+          path: dist/open-daily-stock-gui-${{ github.ref_name }}-macos.dmg
+          retention-days: 30
+
+  # =========================================================
+  # Finalize: release + update Cask
+  # =========================================================
+  finalize:
+    needs: [build-arm64, build-x64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all DMGs
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: dmg-*
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.dmg
         env:
-          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push Cask to homebrew-tap
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_REPO_TOKEN }}
         run: |
-          TAG_VERSION=$(echo "$GITHUB_REF_NAME" | sed 's/^v//')
-          ./scripts/package-macos-app.sh "$TAG_VERSION"
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARM_SHA="${{ needs.build-arm64.outputs.arm_sha }}"
+          INTEL_SHA="${{ needs.build-x64.outputs.intel_sha }}"
+          echo "VERSION=$VERSION ARM=$ARM_SHA INTEL=$INTEL_SHA"
 
-      - name: Upload DMG
-        uses: actions/upload-artifact@v4
-        with:
-          name: open-daily-stock-gui-dmg
-          path: dist/open-daily-stock-gui-*.dmg
-          retention-days: 30
+          # Clone the tap repo
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/mbpz/homebrew-tap" /tmp/homebrew-tap
+          cd /tmp/homebrew-tap
+          mkdir -p Formula
 
-      - name: Upload App Bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: open-daily-stock-gui-app
-          path: dist/open-daily-stock-gui.app
-          retention-days: 30
+          cat > Formula/open-daily-stock.rb <<EOF
+          cask "open-daily-stock" do
+            arch arm: "arm64", intel: "x64"
 
-      - name: Upload DMG to Release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          files: |
-            dist/*.dmg
-            dist/*.exe
+            version "$VERSION"
+            sha256 arm:   "$ARM_SHA",
+                   intel: "$INTEL_SHA"
+
+            url "https://github.com/mbpz/open-daily-stock/releases/download/v#{version}/open-daily-stock-gui-#{version}-macos-#{arch}.dmg"
+            name "Open Daily Stock"
+            desc "Local-first A-share/HK/US stock analyzer with AI, TUI+GUI"
+            homepage "https://github.com/mbpz/open-daily-stock"
+
+            livecheck do
+              url :url
+              strategy :github_latest
+            end
+
+            auto_updates true
+            depends_on macos: ">= :catalina"
+
+            app "open-daily-stock-gui.app"
+
+            zap trash: [
+              "~/Library/Application Support/open-daily-stock",
+              "~/Library/Preferences/com.opendailystock.app.plist",
+              "~/Library/Saved Application State/com.opendailystock.app.savedState",
+            ]
+          end
+          EOF
+
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add Formula/open-daily-stock.rb
+          git diff --cached --stat
+          git commit -m "Update open-daily-stock cask to ${{ github.ref_name }}"
+          git push
