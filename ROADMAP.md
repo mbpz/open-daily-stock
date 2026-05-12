@@ -134,15 +134,15 @@ open-daily-stock (GUI)
 open-daily-stock/
 ├── main.py                 # 主入口（GUI）
 ├── src/
-│   ├── data_service.py     # 后端守护进程（30 actions）
+│   ├── data_service.py     # 后端守护进程（40+ actions）
 │   ├── analyzer.py         # AI 分析器（流式）
 │   ├── agents/             # 多 Agent 协同 [P5-5]
-│   │   ├── technical.py    # 技术面 Agent
-│   │   ├── fundamental.py  # 基本面 Agent
-│   │   ├── news.py         # 新闻 Agent
-│   │   ├── synthesizer.py  # 合成 Agent
-│   │   └── research_agent.py # Agentic Research [P5-9]
-│   ├── rag.py              # RAG 上下文构建 [P5-6]
+│   │   ├── orchestrator.py # 并行协调器
+│   │   ├── technical_agent.py  # 技术面 Agent
+│   │   ├── fundamental_agent.py # 基本面 Agent
+│   │   ├── news_agent.py       # 新闻 Agent
+│   │   ├── synthesizer_agent.py # 合成 Agent
+│   │   └── research_agent.py  # Agentic Research [P5-9]
 │   ├── rag_store.py        # FTS5 知识库 [P5-6]
 │   ├── factor_engine.py    # 因子分析引擎 [P5-10]
 │   ├── commands.py          # 命令统一定义 [P5-7]
@@ -157,10 +157,15 @@ open-daily-stock/
 │   ├── backtester.py       # 回测引擎 [P1-7]
 │   ├── notify/             # 通知渠道 [P0-2]
 │   │   └── channels/      # wechat/feishu/telegram/email/discord
-│   └── search_pkg/         # 搜索模块 [P0-3]
+│   └── data_provider/      # 多源数据（插件架构）
+│       ├── akshare_fetcher.py
+│       ├── yfinance_fetcher.py
+│       ├── efinance_fetcher.py
+│       └── plugin.py       # ProviderRegistry
 ├── gui/                    # GUI 界面（Flet）
-│   └── pages/             # Markets/Analyze/Tasks/Config/Logs/Kline
-└── tests/                 # 287+ 测试
+│   ├── app.py              # StockApp (NavigationRail)
+│   └── pages/              # markets/analyze/tasks/config/logs/chart/strategies/notifications
+└── tests/                  # 750+ 测试
 ```
 
 ---
@@ -209,4 +214,4 @@ open-daily-stock/
 
 ---
 
-*最后更新: 2026-05-12 — 去 TUI，专注文档 GUI ✅*
+*最后更新: 2026-05-12 — 去 TUI，GUI-only，文档同步更新 ✅*
