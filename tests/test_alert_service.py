@@ -112,10 +112,10 @@ class TestAlertService:
 class TestAlertServiceNotification:
     """AlertService 通知测试"""
 
-    @patch('src.alert_service.PLYER_AVAILABLE', False)
     def test_notification_not_sent_when_plyer_unavailable(self):
         """plyer 不可用时不发送通知"""
-        from src.alert_service import AlertService
+        from src.alert_service import AlertService, PLYER_AVAILABLE
+
         service = AlertService(threshold_pct=5.0)
 
         # First call - store price
@@ -124,8 +124,11 @@ class TestAlertServiceNotification:
 
         # Second call - change is 6%, above threshold
         market2 = {"code": "000001", "name": "平安银行", "price": 12.72, "change_pct": 6.0}
-        with patch('src.alert_service.notification') as mock_notify:
+
+        # When PLYER_AVAILABLE is False, check_and_alert_from_change_pct still returns True
+        # (alert is triggered) but _send_notification returns early without calling notification
+        with patch('src.alert_service.PLYER_AVAILABLE', False):
             result = service.check_and_alert_from_change_pct(market2)
 
-        # Alert should be triggered but notification not sent since plyer unavailable
+        # Alert is triggered based on change_pct, but notification is skipped
         assert result is True
