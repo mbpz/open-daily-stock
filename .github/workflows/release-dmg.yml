@@ -73,7 +73,12 @@ jobs:
           rm -f dist/rw-arm64.dmg
 
       - name: Clear quarantine
-        run: xattr -rc "dist/open-daily-stock-gui-${VERSION}-macos-arm64.dmg"
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          DMG_PATH="dist/open-daily-stock-gui-${VERSION}-macos-arm64.dmg"
+          echo "Checking DMG: $DMG_PATH"
+          ls -la "$DMG_PATH" || echo "DMG not found!"
+          xattr -rc "$DMG_PATH" && echo "Quarantine cleared" || echo "xattr failed with $?"
 
       - name: Set arm64 SHA output
         id: sha
@@ -157,7 +162,12 @@ jobs:
           rm -f dist/rw-x64.dmg
 
       - name: Clear quarantine
-        run: xattr -rc "dist/open-daily-stock-gui-${VERSION}-macos.dmg"
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          DMG_PATH="dist/open-daily-stock-gui-${VERSION}-macos.dmg"
+          echo "Checking DMG: $DMG_PATH"
+          ls -la "$DMG_PATH" || echo "DMG not found!"
+          xattr -rc "$DMG_PATH" && echo "Quarantine cleared" || echo "xattr failed with $?"
 
       - name: Set x64 SHA output
         id: sha
