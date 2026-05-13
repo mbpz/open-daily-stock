@@ -48,7 +48,7 @@ websockets>=12.0                # WebSocket server for remote DataService access
 
 # GUI
 flet>=0.25.0                   # Flet GUI framework
-mplfinance>=0.12.10             # K线图表（mplfinance）
+mplfinance>=0.12.0             # K线图表（mplfinance）
 
 # 测试
 pytest>=8.0.0
