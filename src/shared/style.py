@@ -1,6 +1,6 @@
 """Style constants and formatting functions shared between TUI and GUI."""
 
-# Colors (hex strings - TUI/Flet both accept hex)
+# Colors (hex strings - GUI Flet accept hex)
 MARKET_UP_COLOR = "#4CAF50"    # green
 MARKET_DOWN_COLOR = "#F44336"  # red
 MARKET_NEUTRAL_COLOR = "#9E9E9E"  # grey
@@ -13,15 +13,15 @@ UP_ARROW = "▲"
 DOWN_ARROW = "▼"
 NEUTRAL_ARROW = "—"
 
-# TUI colors (Textual foreground names)
-TUI_COLOR_UP = "green"
-TUI_COLOR_DOWN = "red"
-TUI_COLOR_NEUTRAL = "grey"
-
 # GUI colors (Flet int color values)
 GUI_COLOR_UP = 0x4CAF50
 GUI_COLOR_DOWN = 0xF44336
 GUI_COLOR_NEUTRAL = 0x9E9E9E
+
+# Legacy aliases (kept for import compatibility)
+TUI_COLOR_UP = "green"
+TUI_COLOR_DOWN = "red"
+TUI_COLOR_NEUTRAL = "grey"
 
 def format_volume(v: float, code: str = None) -> str:
     """Format volume: A-share/HK use 万/亿, US use M/K.

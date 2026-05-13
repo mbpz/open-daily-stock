@@ -23,7 +23,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install pyinstaller textual flet>=0.25.0
+        run: pip install pyinstaller flet>=0.25.0
 
       - name: Build GUI executable
         run: pyinstaller gui/open-daily-stock.spec
@@ -107,7 +107,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install pyinstaller textual flet>=0.25.0
+        run: pip install pyinstaller flet>=0.25.0
 
       - name: Build GUI executable
         run: pyinstaller gui/open-daily-stock.spec
