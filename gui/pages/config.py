@@ -437,5 +437,5 @@ class ConfigPage(ft.Container):
             self.app._show_update_dialog(version, notes)
         else:
             self.page.show_snack_bar(
-                ft.SnackBar(content=ft.Text("已是最新版本"))
+                ft.SnackBar(content=ft.Text("已是最新版本"), open=True)
             )
