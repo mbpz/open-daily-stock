@@ -1,0 +1,134 @@
+# Daily Stock Analysis — GitHub Actions one-click template
+#
+# 1. Fork open-daily-stock
+# 2. Set repository secrets (Settings → Secrets and variables → Actions):
+#    - DEEPSEEK_API_KEY: Your DeepSeek API key
+#    - DEEPSEEK_BASE_URL: https://api.deepseek.com/v1 (default)
+#    - TELEGRAM_BOT_TOKEN: (optional) Telegram bot token for notifications
+#    - TELEGRAM_CHAT_ID: (optional) Telegram chat ID
+#    - STOCK_LIST: Comma-separated stock codes, e.g. "600519,000001,300750"
+# 3. Enable Actions if not already enabled
+# 4. The workflow runs daily at 15:30 Beijing time (after market close)
+#
+# Results are sent via Telegram or saved as workflow artifacts.
+
+name: Daily Stock Analysis
+
+on:
+  schedule:
+    # 15:30 Beijing time = 07:30 UTC
+    - cron: '30 7 * * 1-5'
+  workflow_dispatch:  # Manual trigger
+    inputs:
+      stock_list:
+        description: 'Stock codes (comma separated)'
+        required: false
+        default: '600519,000001'
+      force_market_review:
+        description: 'Force market review generation'
+        type: boolean
+        default: false
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install flet>=0.25.0 mplfinance>=0.12.0
+
+      - name: Configure API keys
+        run: |
+          mkdir -p ~/.open-daily-stock
+          cat > ~/.open-daily-stock/config.json << EOF
+          {
+            "apis": {
+              "deepseek_key": "${{ secrets.DEEPSEEK_API_KEY }}",
+              "deepseek_base_url": "${{ secrets.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1' }}"
+            },
+            "stocks": "${{ github.event.inputs.stock_list || secrets.STOCK_LIST || '600519,000001' }}".split(","),
+            "notifications": {
+              "telegram_bot_token": "${{ secrets.TELEGRAM_BOT_TOKEN }}",
+              "telegram_chat_id": "${{ secrets.TELEGRAM_CHAT_ID }}"
+            },
+            "market_review_enabled": true,
+            "schedule_enabled": false,
+            "bot_enabled": false
+          }
+          EOF
+
+      - name: Run stock analysis
+        run: |
+          python -c "
+          import json, sys
+          sys.path.insert(0, '.')
+          from src.config import get_config
+          config = get_config()
+          
+          stocks = '${{ github.event.inputs.stock_list || secrets.STOCK_LIST || '600519,000001' }}'.split(',')
+          print(f'Analyzing {len(stocks)} stocks: {stocks}')
+          
+          from src.data_service import DataService
+          ds = DataService()
+          
+          # Analyze each stock
+          for code in stocks:
+              code = code.strip()
+              if not code:
+                  continue
+              try:
+                  result = ds._handle_analyze({'code': code})
+                  print(f'  {code}: {result.get(\"status\", \"error\")}')
+              except Exception as e:
+                  print(f'  {code}: ERROR - {e}')
+          
+          # Market review
+          force = '${{ github.event.inputs.force_market_review }}' == 'true'
+          try:
+              review = ds._handle_get_market_review({'force': force})
+              if review.get('status') == 'ok':
+                  report = review.get('report', '')
+                  # Save report as artifact
+                  with open('market_review.md', 'w') as f:
+                      f.write(report)
+                  print('Market review generated')
+          except Exception as e:
+              print(f'Market review: ERROR - {e}')
+          "
+
+      - name: Upload market review
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-review
+          path: market_review.md
+          retention-days: 7
+
+      - name: Send Telegram notification
+        if: env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -f market_review.md ]; then
+            SUMMARY=$(head -c 500 market_review.md)
+            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -d "chat_id=${TELEGRAM_CHAT_ID}" \
+              -d "text=📊 每日股票分析完成%0A%0A${SUMMARY}" \
+              -d "parse_mode=Markdown"
+          fi

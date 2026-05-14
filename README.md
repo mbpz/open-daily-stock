@@ -28,7 +28,22 @@ winget install mbpz.open-daily-stock
 pip install open-daily-stock
 ```
 
-## 快速开始
+## One-Click Cloud Deployment (GitHub Actions)
+
+No local installation needed — fork and run in the cloud:
+
+1. **Fork** this repository
+2. Go to **Settings → Secrets and variables → Actions** and add:
+   - `DEEPSEEK_API_KEY` — your DeepSeek API key
+   - `STOCK_LIST` — comma-separated codes, e.g. `600519,000001,300750`
+   - `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` (optional, for notifications)
+3. Enable **Actions** in your fork
+4. The workflow runs automatically at 15:30 CST (after market close) on weekdays
+5. Results sent via Telegram or saved as workflow artifacts
+
+→ See [.github/workflows/daily-analysis.yml](.github/workflows/daily-analysis.yml)
+
+## Quick Start (Desktop)
 
 ### GUI 模式
 
@@ -55,6 +70,18 @@ python main.py
 | `4` | 任务 | 分析任务历史 |
 | `5` | 配置 | 配置管理 |
 | `6` | 日志 | 日志查看 |
+
+## English
+
+**open-daily-stock** is a local-first desktop AI stock analysis tool. Double-click to run — no Python, no server, no Docker.
+
+- 📊 Real-time A-Share / HK / US stock quotes (AkShare, YFinance, Efinance)
+- 🤖 AI analysis with multi-agent collaboration (DeepSeek + streaming)
+- 📈 8 built-in trading strategies with backtesting
+- 🔔 5 notification channels (WeCom, Feishu, Telegram, Email, Discord)
+- 🏦 Portfolio tracking, institutional flows, simulated trading
+- 🧩 Plugin architecture (13 built-in plugins, 4 domains)
+- ⚡ Optional Rust acceleration for backtest engine (5-8x speedup)
 
 ## 系统架构
 
