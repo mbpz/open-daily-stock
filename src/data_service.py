@@ -11,7 +11,6 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from datetime import datetime, date
 from typing import Dict, Any, List, Optional, Callable
 
-import sqlite3
 from pathlib import Path
 from .config import get_config
 from .alert_service import AlertService
@@ -54,6 +53,12 @@ class DataService:
         # Initialize database via storage.py (ensures all schema tables exist)
         get_db()
         self._alert_service = AlertService()
+
+        # P6-2: Start scheduled market review
+        self._start_scheduled_market_review()
+
+        # P6-4: Start bot runner
+        self._start_bot()
 
         # === Thread Pool for concurrent request handling ===
         self._executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_REQUESTS)
@@ -1829,6 +1834,24 @@ class DataService:
         logger.info(
             f"Market review scheduler started (enabled={get_config().market_review_enabled}, time={get_config().schedule_time})"
         )
+
+    def _start_bot(self):
+        """Start bot polling loop if configured (P6-4)."""
+        config = get_config()
+        if not config.bot_enabled:
+            return
+        if not config.telegram_bot_token:
+            logger.info("No Telegram bot token configured, skipping bot")
+            return
+        try:
+            from src.bot.dispatcher import build_dispatcher, BotRunner
+            dispatcher = build_dispatcher(self)
+            self._bot_runner = BotRunner(dispatcher, config)
+            self._bot_runner.start()
+            logger.info("Bot runner started (Telegram polling)")
+        except Exception as e:
+            logger.error(f"Failed to start bot: {e}")
+
 
     # === Existing Helper Methods ===
 

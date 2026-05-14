@@ -169,7 +169,7 @@ def get_market_cache() -> MarketDataCache:
 Base = declarative_base()
 
 # Current database schema version
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4  # P7-1: MarketReview table
 
 
 # === Migration System ===
@@ -209,6 +209,11 @@ def _run_migrations(db: 'DatabaseManager', from_version: int, to_version: int) -
         # P5-6: Add FTS5 virtual table for RAG knowledge base
         _migrate_v3_add_fts5(db)
         logger.info("Migration v2 -> v3 applied (FTS5 RAG index)")
+
+    if from_version < 4 and to_version >= 4:
+        # P7-1: MarketReview table — auto-created via Base.metadata.create_all
+        Base.metadata.create_all(db._engine)
+        logger.info("Migration v3 -> v4 applied (MarketReview table)")
 
     # Record the new schema version after all migrations succeed
     # Only insert if this version hasn't been recorded yet (idempotent)
@@ -2045,6 +2050,59 @@ class MarketReview(Base):
             'market_summary': self.market_summary,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
+
+
+    # === P7-1: Backup & Restore ===
+
+    def backup(self, backup_path: Optional[str] = None) -> str:
+        """Create a SQL dump backup of the database.
+
+        Args:
+            backup_path: Optional path for the backup file.
+                         Defaults to data/stock_analysis_backup_<timestamp>.db
+
+        Returns:
+            Path to the backup file.
+        """
+        import shutil
+        from datetime import datetime
+
+        if backup_path is None:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            backup_path = f"data/stock_analysis_backup_{timestamp}.db"
+
+        # Ensure parent directory exists
+        Path(backup_path).parent.mkdir(parents=True, exist_ok=True)
+
+        # Get the source DB path from the engine URL
+        source_path = str(self._engine.url).replace('sqlite:///', '')
+        if not source_path or source_path == ':memory:':
+            logger.warning("Cannot backup in-memory database")
+            return ""
+
+        shutil.copy2(source_path, backup_path)
+        logger.info(f"Database backed up to {backup_path}")
+        return backup_path
+
+    def restore(self, backup_path: str) -> bool:
+        """Restore database from a backup file.
+
+        Args:
+            backup_path: Path to the backup .db file.
+
+        Returns:
+            True if restore succeeded.
+        """
+        import shutil
+
+        if not Path(backup_path).exists():
+            logger.error(f"Backup file not found: {backup_path}")
+            return False
+
+        source_path = str(self._engine.url).replace('sqlite:///', '')
+        shutil.copy2(backup_path, source_path)
+        logger.info(f"Database restored from {backup_path}")
+        return True
 
 
 # 便捷函数
