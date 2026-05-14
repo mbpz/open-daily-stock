@@ -35,7 +35,7 @@ class UpdateChecker:
     def get_release_info(self) -> Tuple[str, str]:
         if not self._latest_version:
             self.check_latest_version()
-        return (self._latest_version or self.current_version,
+        return ((self._latest_version or self.current_version).strip('v'),
                 self._release_notes or "")
 
     @staticmethod
