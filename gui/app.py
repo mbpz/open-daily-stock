@@ -377,9 +377,8 @@ class StockApp:
 
     def _check_update(self, e):
         """Check for application updates"""
-        checker = UpdateChecker(current_version=VERSION)
-        if checker.is_new_version_available():
-            version, notes = checker.get_release_info()
+        if self._update_checker.is_new_version_available():
+            version, notes = self._update_checker.get_release_info()
             self._show_update_dialog(version, notes)
         else:
             self.page.show_snack_bar(
