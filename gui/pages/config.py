@@ -29,6 +29,10 @@ class ConfigPage(ft.Container):
         self._alert_channel_field = None
         self._alerts_list = []
         self._selected_alert_idx = None
+
+        # Must be before any config.X access
+        config = get_config()
+
         self._auto_check_enabled = config.auto_check_update
 
         self._load_alerts()
@@ -53,7 +57,6 @@ class ConfigPage(ft.Container):
             border_radius=10,
         )
 
-        config = get_config()
         stock_value = ','.join(config.stock_list) if config.stock_list else ''
 
         api_section = self._build_section(_("API 配置"), [
