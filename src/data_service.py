@@ -111,6 +111,8 @@ class DataService:
             "sim_reset": "_handle_sim_reset",
             "get_keybindings": "_handle_get_keybindings",
             "list_providers": "_handle_list_providers",
+            "list_plugins": "_handle_list_plugins",
+            "get_plugin_info": "_handle_get_plugin_info",
             "export_strategy": "_handle_export_strategy",
             "import_strategy": "_handle_import_strategy",
             "list_strategies": "_handle_list_strategies",
@@ -1894,6 +1896,33 @@ class DataService:
             return {"status": "error", "message": str(e)}
 
     # === P7-3: EventBus Integration ===
+
+    # === P7-4: Plugin Manager Handlers ===
+
+    def _handle_list_plugins(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """List all registered plugins (P7-4)."""
+        try:
+            from src.plugin_manager import list_all_plugins
+            domain = req.get("domain")
+            plugins = list_all_plugins()
+            if domain:
+                plugins = [p for p in plugins if p["domain"] == domain]
+            return {"status": "ok", "data": plugins}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    def _handle_get_plugin_info(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """Get plugin details (P7-4)."""
+        try:
+            from src.plugin_manager import get_plugin_manager
+            pm = get_plugin_manager()
+            domain = req.get("domain", "")
+            name = req.get("name", "")
+            plugins = pm.get_domain_plugins(domain)
+            info = plugins.get(name)
+            return {"status": "ok", "data": str(info)[:500] if info else None}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
     def _init_event_bus(self):
         """Wire internal handlers to EventBus for decoupled communication."""
