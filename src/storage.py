@@ -2027,6 +2027,26 @@ class NotificationRecord(Base):
         }
 
 
+class MarketReview(Base):
+    """Market review report model (P6-2)."""
+    __tablename__ = 'market_reviews'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    review_date = Column(String(10), nullable=False, index=True)  # YYYY-MM-DD
+    report_md = Column(Text, nullable=False)  # Markdown report
+    market_summary = Column(Text)  # Brief summary for listing
+    created_at = Column(DateTime, default=datetime.now)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'id': self.id,
+            'review_date': self.review_date,
+            'report_md': self.report_md,
+            'market_summary': self.market_summary,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 # 便捷函数
 def get_db() -> DatabaseManager:
     """获取数据库管理器实例的快捷方式"""

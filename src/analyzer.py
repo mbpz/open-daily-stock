@@ -225,6 +225,9 @@ class AnalysisResult:
     # ========== 元数据 ==========
     raw_response: Optional[str] = None  # 原始响应（调试用）
     search_performed: bool = False  # 是否执行了联网搜索
+    # P6-3: Reflection
+    reflection_note: Optional[str] = None  # ReflectionNote JSON string
+    confidence_calibration: Optional[str] = None  # 置信度校准说明
     data_sources: str = ""  # 数据来源说明
     success: bool = True
     error_message: Optional[str] = None
@@ -258,6 +261,8 @@ class AnalysisResult:
             'buy_reason': self.buy_reason,
             'search_performed': self.search_performed,
             'success': self.success,
+            'reflection_note': self.reflection_note,
+            'confidence_calibration': self.confidence_calibration,
             'error_message': self.error_message,
         }
     

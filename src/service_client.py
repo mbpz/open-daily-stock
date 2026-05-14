@@ -41,6 +41,14 @@ class ServiceClient:
         resp = self._send_request("refresh")
         return resp.get("status") == "ok"
 
+    def get_market_review(self, force: bool = False) -> Dict[str, Any]:
+        """Generate market review report (P6-2)."""
+        return self._send_request("get_market_review", {"force": force})
+
+    def get_market_reviews_history(self, limit: int = 10) -> Dict[str, Any]:
+        """Get historical market review reports (P6-2)."""
+        return self._send_request("get_market_reviews_history", {"limit": limit})
+
     def analyze(self, code: str) -> Dict[str, Any]:
         """分析股票"""
         return self._send_request("analyze", {"code": code})

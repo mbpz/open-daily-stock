@@ -1,7 +1,8 @@
 """Simple backtester engine for stock strategy testing"""
 from dataclasses import dataclass
-from typing import List, Dict, Callable, Optional, Tuple
+from typing import List, Dict, Callable, Optional, Tuple, Union
 from datetime import datetime
+from src.strategies.base import BaseStrategy
 
 
 @dataclass
@@ -180,18 +181,22 @@ def _calculate_sharpe_ratio(daily_returns: List[float], risk_free_rate: float = 
     return sharpe
 
 
-def backtest(history_data: List[Dict], initial_capital: float, strategy_fn: Callable) -> BacktestResult:
+def backtest(
+    history_data: List[Dict],
+    initial_capital: float,
+    strategy_fn: Union[Callable, BaseStrategy],
+) -> BacktestResult:
     """Run backtest on historical data
 
     Args:
         history_data: List of daily OHLCV data
         initial_capital: Starting capital
-        strategy_fn: Strategy function that takes data and returns trades
+        strategy_fn: Strategy function (Callable) or BaseStrategy instance
 
     Returns:
         BacktestResult with metrics
     """
-    if not history_data or initial_capital <= 0:
+    if not history_data or initial_capital <= 0 or strategy_fn is None:
         return BacktestResult(
             total_return=0.0,
             max_drawdown=0.0,
@@ -200,8 +205,11 @@ def backtest(history_data: List[Dict], initial_capital: float, strategy_fn: Call
             win_rate=0.0
         )
 
-    # Run strategy to get trades
-    trades = strategy_fn(history_data)
+    # Run strategy: support both callable and BaseStrategy
+    if isinstance(strategy_fn, BaseStrategy):
+        trades = strategy_fn.generate_trades(history_data)
+    else:
+        trades = strategy_fn(history_data)
 
     # Calculate portfolio values (also gets win/loss counts)
     portfolio_values, daily_returns, completed_sells, winning_trades = _calculate_returns(

@@ -70,6 +70,7 @@ class MarketOverview:
     limit_down_count: int = 0           # 跌停家数
     total_amount: float = 0.0           # 两市成交额（亿元）
     north_flow: float = 0.0             # 北向资金净流入（亿元）
+    main_fund_flow: float = 0.0         # 主力资金净流入（亿元）P6-2
     
     # 板块涨幅榜
     top_sectors: List[Dict] = field(default_factory=list)     # 涨幅前5板块
@@ -132,6 +133,9 @@ class MarketAnalyzer:
         # 4. 获取北向资金（可选）
         # self._get_north_flow(overview)
         
+        # 5. 获取主力资金流向 (P6-2)
+        self._get_main_fund_flow(overview)
+
         return overview
 
     def _call_akshare_with_retry(self, fn, name: str, attempts: int = 2):
@@ -344,6 +348,28 @@ class MarketAnalyzer:
     #     except Exception as e:
     #         logger.warning(f"[大盘] 获取北向资金失败: {e}")
     
+    def _get_main_fund_flow(self, overview: MarketOverview):
+        """获取主力资金流向数据 (P6-2)."""
+        try:
+            df = self._call_akshare_with_retry(
+                lambda: ak.stock_market_fund_flow(),
+                "主力资金流向",
+                attempts=1
+            )
+            if df is not None and not df.empty:
+                latest = df.iloc[0]
+                main_net = latest.get("主力净流入-净额", 0)
+                if main_net and float(main_net) != 0:
+                    overview.main_fund_flow = float(main_net) / 1e8
+                    logger.info(f"[大盘] 主力资金净流入: {overview.main_fund_flow:.2f}亿")
+            else:
+                overview.main_fund_flow = 0.0
+        except AttributeError:
+            overview.main_fund_flow = 0.0
+            logger.debug("[大盘] 主力资金流向接口不可用")
+        except Exception as e:
+            logger.warning(f"[大盘] 获取主力资金流向失败: {e}")
+
     def search_market_news(self) -> List[Dict]:
         """
         搜索市场新闻

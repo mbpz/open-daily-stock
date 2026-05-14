@@ -2,6 +2,8 @@
 
 **项目定位：** 本地 PC 端 GUI 应用，无需服务端，打包后双击即可使用所有功能。
 
+**路线图版本：** v0.4.0（P0-P5 已完成） → **v0.5.0**（P6 竞争力强化） → **v0.6.0**（P7 架构深化）
+
 ---
 
 ## 一、架构概览
@@ -120,10 +122,10 @@ open-daily-stock (GUI)
 |------|------|
 | GUI 框架 | Flet >= 0.25 |
 | 数据获取 | AkShare、YFinance |
-| AI 分析 | Gemini / OpenAI 兼容 API + 多 Agent + 流式 |
+| AI 分析 | DeepSeek（OpenAI 兼容 API）+ 多 Agent + 流式 |
 | 数据库 | SQLite + SQLAlchemy ORM |
-| 进程通信 | stdio JSON |
-| 图表 | mplfinance (K线) |
+| 进程通信 | stdio JSON → WebSocket（v0.6.0 升级） |
+| 图表 | mplfinance (K线静态) / pyqtgraph（v0.6.0 实时） |
 | 打包 | PyInstaller |
 
 ---
@@ -190,28 +192,146 @@ open-daily-stock/
 
 ## 八、待完成任务
 
+### 设计原则（贯穿 P6/P7）
+
+- **本地 PC 桌面优先** — 不向 Web/Docker 妥协。打包后双击即用是核心体验。
+- **AI 模型精简** — 仅维护 DeepSeek（OpenAI 兼容 API），不扩展 Claude/通义千问/Ollama 等多模型支持。减少维护矩阵，聚焦分析质量。
+- **深度优于广度** — 每个模块做深而非做多。策略引擎、Agent 反思、市场复盘都要做到真正可用。
+
+---
+
 ### P6 — 竞争力强化
 
-- [ ] **P6-1: 策略配置 DSL** — YAML 策略注册表（对标 daily_stock 11 策略）
-- [ ] **P6-2: 市场复盘日报** — 自动生成市场概况 + LLM 摘要
-- [ ] **P6-3: Agent 反思循环** — 分析结果自检 + 矛盾检测 + 置信度校准
-- [ ] **P6-4: Bot/IM 双向交互** — Telegram 命令查行情/触发分析
+| 任务 | 说明 | 对标/参考 | 测试目标 |
+|------|------|-----------|:---:|
+| **P6-1: 策略引擎升级** | 从 7 个 YAML DSL 扩展到完整策略基类。支持 RSI/MACD/Bollinger/KDJ 等技术指标策略、多条件组合、止盈止损参数化。对标 freqtrade 的策略类架构 | freqtrade Strategy base class | 30+ |
+| **P6-2: 市场复盘日报** | 每日自动生成：指数表现、涨跌统计、板块强弱、资金流向 + LLM 自然语言摘要。对标 daily_stock_analysis 的市场复盘功能 | daily_stock_analysis | 20+ |
+| **P6-3: Agent 反思循环** | 分析完成后自检：信号一致性验证（技术面 vs 基本面矛盾检测）、置信度校准（历史准确率加权）、未覆盖风险提示。二轮 LLM call 做 critical review | 原创能力 | 25+ |
+| **P6-4: Bot/IM 双向交互** | Telegram/Discord Bot 支持命令式查询：`/quote 600519` 查行情、`/analyze 600519` 触发分析、`/alert 600519 >1800` 设价格告警。对标 freqtrade Telegram RPC | freqtrade Telegram RPC | 20+ |
 
-### P7 — 生态建设
+### P6 架构偿还（与 P6 功能并行）
 
-- [ ] **P7-1: 插件架构** — 数据源/通知渠道/AI 模型统一可插拔接口
-- [ ] **P7-2: 策略超参优化** — Optuna 自动寻优
-- [ ] **P7-3: EventBus 事件驱动** — 模块异步解耦
-- [ ] **P7-4: 策略社区** — 策略导入/导出 + GitHub 模板仓库
+| 任务 | 说明 | 优先级 |
+|------|------|:---:|
+| **per-request 超时机制** | handler thread pool + 30s timeout，防止单请求挂死拖累整个 DataService daemon | 🔴 P0 |
 
-### 明确不做
+---
+
+### P7 — 架构深化
+
+| 任务 | 说明 | 对标/参考 | 测试目标 |
+|------|------|-----------|:---:|
+| **P7-1: 统一存储层** | 全部迁移到 SQLAlchemy ORM。消除 storage.py 与 data_service.py 双存储混用，统一事务语义、migration 路径。对标 freqtrade persistence 层 | freqtrade persistence/ | — |
+| **P7-2: WebSocket IPC** | DataService 支持 WebSocket server，替代纯 stdio JSON 单向阻塞。支持双向异步推送、streaming 复用。对标 freqtrade WebSocket RPC | freqtrade RPC WebSocket | 15+ |
+| **P7-3: EventBus 事件驱动** | 模块间异步解耦。替换当前硬编码 handler 调用。支持事件订阅/发布、优先级队列。对标 vnpy EventBus | vnpy trader/event.py | 20+ |
+| **P7-4: 插件架构** | 数据源（AkShare/YFinance/efinance）、通知渠道（企微/飞书/TG/邮件/Discord）、AI 模型统一可插拔接口。依赖注入 + Provider 注册表 | freqtrade resolvers/ | 25+ |
+| **P7-5: 策略超参优化** | Optuna 贝叶斯优化自动寻优策略参数（MA周期、RSI阈值、止损比例）。对标 freqtrade Hyperopt | freqtrade Hyperopt | 15+ |
+| **P7-6: 策略社区** | 策略 JSON 导入/导出标准格式、GitHub 模板仓库（open-daily-stock-strategies）、策略市场/排行榜 | freqtrade 社区 | 10+ |
+
+### P7 性能与质量
+
+| 任务 | 说明 | 对标/参考 |
+|------|------|-----------|
+| **测试体系建设** | 目标 500+ 测试，覆盖率 >80%，CI/CD 集成。对标 freqtrade 2000+ 测试体系 | freqtrade tests/ |
+| **Rust 加速路径** | 回测引擎关键路径用 Rust FFI（PyO3/maturin）。数据处理、因子计算等 CPU 密集场景。对标 QUANTAXIS qapro-rs | QUANTAXIS qapro-rs |
+| **社区增长策略** | GitHub Actions 自动化模板（一键 fork 部署）、多语言 README（English/繁中）、视频教程（YouTube/B站）、Product Hunt 发布 | — |
+
+---
+
+## 九、P6/P7 详细设计
+
+### P6-1: 策略引擎升级
+
+```
+当前：strategies/*.yaml (7 个静态 YAML)
+目标：src/strategies/ 策略基类 + 参数化
+
+src/strategies/
+├── __init__.py
+├── base.py              # BaseStrategy 抽象基类
+├── registry.py          # StrategyRegistry 注册表
+├── builtin/
+│   ├── ma_cross.py      # 均线金叉/死叉
+│   ├── rsi_strategy.py  # RSI 超买超卖
+│   ├── macd_strategy.py # MACD 金叉/背离
+│   ├── bollinger.py     # 布林带突破
+│   ├── kdj_strategy.py  # KDJ 指标
+│   ├── volume_break.py  # 放量突破
+│   ├── trend_follow.py  # 趋势跟随
+│   └── mean_revert.py   # 均值回归
+└── community/           # 社区策略 JSON 加载
+```
+
+**BaseStrategy 接口：**
+- `entry_signal(df) → bool` — 入场条件
+- `exit_signal(df, position) → bool` — 出场条件
+- `get_indicators() → List[str]` — 所需指标列表
+- `get_params() → Dict` — 可调参数
+
+### P6-2: 市场复盘日报
+
+```
+src/core/market_review.py  (已有，需增强)
+
+每日自动内容：
+1. 指数概览 — 上证/深证/创业板 涨跌幅 + 成交量
+2. 涨跌统计 — 涨跌比、涨停/跌停数
+3. 板块强弱 — 行业板块排名（AkShare 板块接口）
+4. 资金流向 — 北向资金/主力资金
+5. LLM 摘要 — DeepSeek 生成自然语言市场概述
+6. 推送 — 通过现有通知渠道推送日报
+
+触发方式：GUI 手动触发 + 收盘后自动（15:30 定时）
+```
+
+### P6-3: Agent 反思循环
+
+```
+分析流程增强：
+
+1. 多 Agent 并行分析（现有）
+2. Synthesizer 合成报告（现有）
+3. 【新增】Reflector 自检：
+   a. 信号一致性 — 技术面看多 + 基本面看空 → 标记矛盾
+   b. 置信度校准 — 基于历史分析准确率加权
+   c. 风险未覆盖 — 政策/流动性/国际形势等外部风险提示
+4. 二次 LLM call 做 critical review
+5. 输出：主报告 + 反思附注
+
+新增文件：src/agents/reflector_agent.py
+```
+
+### P6-4: Bot/IM 双向交互
+
+```
+src/bot/  (已有目录结构，需实现)
+├── __init__.py
+├── base.py              # BotBase 抽象基类
+├── dispatcher.py        # 命令分发器
+└── platforms/
+    ├── __init__.py
+    ├── telegram.py      # Telegram Bot（python-telegram-bot）
+    └── discord.py        # Discord Bot（discord.py）
+
+支持命令：
+/quote <code>        — 实时行情
+/analyze <code>      — 触发 AI 分析
+/alert <code> <cond> — 设置价格告警
+/positions           — 查看持仓
+/review              — 市场复盘日报
+```
+
+---
+
+## 十、明确不做
 
 - ❌ 实盘交易接口 — 法律风险
 - ❌ Pine Script 兼容 — 维护成本高
 - ❌ Docker 默认部署 — 与"双击运行"矛盾
-- ❌ 纯 Web SaaS — 与本地优先矛盾
+- ❌ 纯 Web SaaS / Streamlit — 与本地桌面优先矛盾
 - ❌ TUI/CLI 模式 — 已移除，专注 GUI 体验
+- ❌ 多 AI 模型扩展（Claude/通义千问/Ollama） — 聚焦 DeepSeek，减少维护矩阵
 
 ---
 
-*最后更新: 2026-05-12 — 去 TUI，GUI-only，文档同步更新 ✅*
+*最后更新: 2026-05-13 — P6/P7 详细规划，v0.5.0/v0.6.0 路线图*

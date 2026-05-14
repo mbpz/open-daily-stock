@@ -15,7 +15,7 @@ import sqlite3
 from pathlib import Path
 from .config import get_config
 from .alert_service import AlertService
-from .storage import get_db, get_market_cache
+from .storage import get_db, get_market_cache, MarketReview
 from .sim_trading import SimAccount
 from .financials import FinancialDataFetcher, _safe_float
 
@@ -96,6 +96,7 @@ class DataService:
             "get_financials": "_handle_get_financials",
             "get_key_metrics": "_handle_get_key_metrics",
             "get_market_overview": "_handle_get_market_overview",
+            "get_market_reviews_history": "_handle_get_market_reviews_history",
             "get_market_review": "_handle_get_market_review",
             "quit": "_handle_quit",
             "sim_buy": "_handle_sim_buy",
@@ -1272,6 +1273,7 @@ class DataService:
             return {"status": "error", "message": "缺少 initial_capital 参数"}
 
         days = req.get("days", 60)  # 默认 60 天
+        strategy_name = req.get("strategy", "")  # P6-1: 可选策略名称
 
         try:
             # 获取历史数据
@@ -1283,15 +1285,43 @@ class DataService:
             if not history_data:
                 return {"status": "ok", "data": [], "message": "无历史数据"}
 
-            # 运行回测
+            # P6-1: 支持多种策略
             from src.backtester import backtest, ma_crossover_strategy
-            result = backtest(history_data, initial_capital=initial_capital, strategy_fn=ma_crossover_strategy)
+            from src.strategies import get_python_strategy, get_strategy
+
+            strategy_fn = ma_crossover_strategy  # 默认
+            strategy_label = "MA交叉(默认)"
+
+            if strategy_name:
+                # 优先查找 Python 内置策略
+                py_strat = get_python_strategy(strategy_name)
+                if py_strat is not None:
+                    # 允许请求参数覆盖策略参数
+                    strat_params = req.get("strategy_params", {})
+                    if strat_params:
+                        py_strat = py_strat.__class__(**strat_params)
+                    strategy_fn = py_strat
+                    strategy_label = py_strat.display_name
+                else:
+                    # 尝试 YAML 策略（暂不支持回测，返回提示）
+                    yaml_strat = get_strategy(strategy_name)
+                    if yaml_strat is not None and not hasattr(yaml_strat, "generate_trades"):
+                        return {
+                            "status": "error",
+                            "message": f"YAML策略 '{strategy_name}' 暂不支持回测，请使用Python内置策略"
+                        }
+
+            result = backtest(
+                history_data,
+                initial_capital=initial_capital,
+                strategy_fn=strategy_fn,
+            )
 
             # In-app notification
             try:
                 from src.notification_center import get_notification_center
                 get_notification_center().notify(
-                    title=f"回测完成: {code}",
+                    title=f"回测完成: {code} [{strategy_label}]",
                     message=f"收益率 {result.total_return:+.2f}%  胜率 {result.win_rate:.1f}%  交易 {result.num_trades}次",
                     level="info",
                     category="backtest_complete",
@@ -1303,6 +1333,7 @@ class DataService:
             return {
                 "status": "ok",
                 "data": {
+                    "strategy": strategy_label,
                     "total_return": result.total_return,
                     "max_drawdown": result.max_drawdown,
                     "sharpe_ratio": result.sharpe_ratio,
@@ -1648,21 +1679,156 @@ class DataService:
             return {"status": "error", "message": str(e)}
 
     def _handle_get_market_review(self, req: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate end-of-day market review report."""
+        """Generate end-of-day market review report and save to DB (P6-2).
+
+        Supports optional `force` param to regenerate even if today's report exists.
+        """
         try:
+            today = datetime.now().strftime('%Y-%m-%d')
+            force = req.get("force", False)
+
+            # Check if today's report already exists (cache)
+            if not force:
+                try:
+                    db = get_db()
+                    with db.get_session() as session:
+                        existing = session.query(MarketReview).filter(
+                            MarketReview.review_date == today
+                        ).first()
+                        if existing:
+                            return {
+                                "status": "ok",
+                                "report": existing.report_md,
+                                "review_date": today,
+                                "cached": True,
+                            }
+                except Exception:
+                    pass
+
+            # Build MarketAnalyzer with configured AI provider
             from src.market_analyzer import MarketAnalyzer
-            analyzer = MarketAnalyzer(search_service=None, analyzer=None)
             from src.analyzer import GeminiAnalyzer
-            gemini = GeminiAnalyzer()
-            analyzer_with_ai = MarketAnalyzer(
-                search_service=analyzer.search_service,
-                analyzer=gemini if gemini.is_available() else None,
+
+            ai_analyzer = GeminiAnalyzer()
+            if not ai_analyzer.is_available():
+                ai_analyzer = None
+
+            market_analyzer = MarketAnalyzer(
+                search_service=None,
+                analyzer=ai_analyzer,
             )
-            report = analyzer_with_ai.run_market_review()
-            return {"status": "ok", "report": report}
+            report = market_analyzer.run_market_review()
+
+            if not report:
+                return {"status": "error", "message": "生成复盘报告失败（数据获取异常）"}
+
+            # Extract short summary
+            summary = report[:200].replace("#", "").replace("*", "").strip()
+
+            # Save to DB
+            try:
+                db = get_db()
+                with db.get_session() as session:
+                    review = MarketReview(
+                        review_date=today,
+                        report_md=report,
+                        market_summary=summary,
+                    )
+                    session.add(review)
+                    session.commit()
+                logger.info(f"Market review saved to DB for {today}")
+            except Exception as e:
+                logger.warning(f"Failed to save market review to DB: {e}")
+
+            # Send notification
+            try:
+                from src.notification import NotificationService
+                ns = NotificationService()
+                ns.send(f"🎯 大盘复盘 {today}\n\n{summary}...")
+            except Exception:
+                pass
+
+            return {
+                "status": "ok",
+                "report": report,
+                "review_date": today,
+                "cached": False,
+            }
         except Exception as e:
             logger.error(f"生成市场复盘报告失败: {e}")
             return {"status": "error", "message": str(e)}
+
+    def _handle_get_market_reviews_history(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """Retrieve historical market review reports (P6-2)."""
+        try:
+            limit = req.get("limit", 10)
+            db = get_db()
+            with db.get_session() as session:
+                reviews = session.query(MarketReview).order_by(
+                    MarketReview.review_date.desc()
+                ).limit(limit).all()
+                return {
+                    "status": "ok",
+                    "data": [
+                        {"review_date": r.review_date, "summary": r.market_summary, "report": r.report_md}
+                        for r in reviews
+                    ],
+                }
+        except Exception as e:
+            logger.error(f"查询历史复盘失败: {e}")
+            return {"status": "error", "message": str(e)}
+
+    # === P6-2: Scheduled Market Review ===
+
+    def _start_scheduled_market_review(self):
+        """Start a background thread that runs market review at configured time."""
+        import threading
+
+        def _schedule_loop():
+            import time
+            last_run_date: Optional[str] = None
+
+            while self._running:
+                try:
+                    config = get_config()
+                    if not config.market_review_enabled:
+                        time.sleep(60)
+                        continue
+
+                    now = datetime.now()
+                    today = now.strftime('%Y-%m-%d')
+
+                    # Parse schedule time
+                    try:
+                        hour, minute = map(int, config.schedule_time.split(':'))
+                    except (ValueError, AttributeError):
+                        hour, minute = 15, 30
+
+                    # Check if it's time to run and hasn't run today
+                    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+                    if now >= target and last_run_date != today:
+                        logger.info(f"⏰ Scheduled market review triggered at {now.strftime('%H:%M')}")
+                        try:
+                            result = self._handle_get_market_review({"force": True})
+                            if result.get("status") == "ok":
+                                last_run_date = today
+                                logger.info(f"✅ Scheduled market review completed for {today}")
+                            else:
+                                logger.warning(f"Scheduled market review failed: {result.get('message', 'unknown')}")
+                        except Exception as e:
+                            logger.error(f"Scheduled market review error: {e}")
+
+                    time.sleep(60)
+                except Exception as e:
+                    logger.error(f"Scheduler loop error: {e}")
+                    time.sleep(60)
+
+        t = threading.Thread(target=_schedule_loop, daemon=True, name="market-review-scheduler")
+        t.start()
+        logger.info(
+            f"Market review scheduler started (enabled={get_config().market_review_enabled}, time={get_config().schedule_time})"
+        )
 
     # === Existing Helper Methods ===
 
@@ -1767,8 +1933,27 @@ class DataService:
     def _handle_list_strategies(self, req: Dict[str, Any]) -> Dict[str, Any]:
         """List all saved strategies."""
         try:
-            strategies = self._load_all_strategies()
-            return {"status": "ok", "data": strategies}
+            # 加载 JSON 策略文件
+            json_strategies = self._load_all_strategies()
+
+            # P6-1: 合并 Python 内置策略
+            from src.strategies.builtin import BUILTIN_STRATEGIES
+            builtin_list = []
+            for cls in BUILTIN_STRATEGIES:
+                instance = cls()
+                builtin_list.append({
+                    "name": instance.name,
+                    "display_name": instance.display_name,
+                    "description": instance.description,
+                    "category": instance.category,
+                    "params": instance.get_params(),
+                    "type": "python",
+                })
+
+            return {
+                "status": "ok",
+                "data": builtin_list + json_strategies,
+            }
         except Exception as e:
             logger.error(f"Failed to list strategies: {e}")
             return {"status": "error", "message": f"List failed: {str(e)}"}

@@ -11,6 +11,7 @@ Architecture:
     4. Return final AnalysisResult
 """
 
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 from typing import Dict, Any, TYPE_CHECKING
@@ -19,6 +20,7 @@ from .technical_agent import TechnicalAgent
 from .fundamental_agent import FundamentalAgent
 from .news_agent import NewsAgent
 from .synthesizer_agent import SynthesizerAgent
+from .reflector_agent import ReflectorAgent, ReflectionNote
 
 if TYPE_CHECKING:
     from src.analyzer import GeminiAnalyzer, AnalysisResult
@@ -34,6 +36,9 @@ class MultiAgentOrchestrator:
 
     Runs Technical, Fundamental, and News specialist agents concurrently,
     then synthesizes their outputs into a single AnalysisResult.
+
+    P6-3: After synthesis, runs ReflectorAgent for critical review
+    and confidence calibration.
 
     Usage:
         analyzer = GeminiAnalyzer()
@@ -53,6 +58,7 @@ class MultiAgentOrchestrator:
             NewsAgent(),
         ]
         self.synthesizer = SynthesizerAgent()
+        self.reflector = ReflectorAgent()  # P6-3
 
     def analyze(
         self, code: str, context: Dict[str, Any]
@@ -108,6 +114,29 @@ class MultiAgentOrchestrator:
         final_result = self.synthesizer.synthesize(
             code, context, specialist_results, self.analyzer
         )
+
+        # Phase 3: Reflection (P6-3)
+        try:
+            reflection = self.reflector.reflect(
+                final_result,
+                specialist_results={
+                    k: v for k, v in specialist_results.items()
+                    if not (isinstance(v, dict) and "error" in v)
+                },
+                analyzer=self.analyzer,
+            )
+            final_result.reflection_note = json.dumps(
+                reflection.to_dict(), ensure_ascii=False, default=str
+            )
+            final_result.confidence_calibration = reflection.calibration_note
+            if reflection.calibrated_confidence != final_result.confidence_level:
+                final_result.confidence_level = reflection.calibrated_confidence
+            logger.info(
+                f"[Orchestrator] Reflection complete: consistent={reflection.signal_consistent}, "
+                f"confidence={reflection.original_confidence}→{reflection.calibrated_confidence}"
+            )
+        except Exception as e:
+            logger.warning(f"[Orchestrator] Reflection phase failed (non-fatal): {e}")
 
         logger.info(
             f"[Orchestrator] Multi-agent analysis complete for {name}({code}): "
