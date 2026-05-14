@@ -77,3 +77,4 @@ verify_*.pysite/
 # Worktrees
 .worktrees/
 charts_cache/
+.deepseek/
