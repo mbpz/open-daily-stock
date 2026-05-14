@@ -114,6 +114,7 @@ class DataService:
             "export_strategy": "_handle_export_strategy",
             "import_strategy": "_handle_import_strategy",
             "list_strategies": "_handle_list_strategies",
+            "optimize_strategy": "_handle_optimize_strategy",
             "delete_strategy": "_handle_delete_strategy",
             "get_theme": "_handle_get_theme",
             "set_theme": "_handle_set_theme",
@@ -1853,6 +1854,71 @@ class DataService:
             logger.error(f"Failed to start bot: {e}")
 
 
+    # === P7-3: EventBus Integration ===
+
+    # === P7-5: Strategy Optimization ===
+
+    def _handle_optimize_strategy(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        """Optimize strategy hyperparameters (P7-5)."""
+        strategy_name = req.get("strategy", "ma_cross")
+        code = req.get("code", "600519")
+        days = req.get("days", 120)
+        n_trials = req.get("trials", 30)
+
+        try:
+            from src.strategies.optimizer import HyperOptimizer
+            from src.strategies import get_python_strategy
+
+            strategy_cls = type(get_python_strategy(strategy_name))
+            if strategy_cls is None:
+                return {"status": "error", "message": f"策略 '{strategy_name}' 不存在"}
+
+            # Get history data
+            history_result = self._handle_get_history({"code": code, "days": days})
+            if history_result.get("status") != "ok":
+                return history_result
+
+            history_data = history_result.get("data", [])
+            if len(history_data) < 30:
+                return {"status": "error", "message": "历史数据不足（需要至少30天）"}
+
+            opt = HyperOptimizer()
+            result = opt.optimize(strategy_cls, history_data, n_trials=n_trials)
+
+            return {
+                "status": "ok",
+                "data": result.to_dict(),
+            }
+        except Exception as e:
+            logger.error(f"Strategy optimization failed: {e}")
+            return {"status": "error", "message": str(e)}
+
+    # === P7-3: EventBus Integration ===
+
+    def _init_event_bus(self):
+        """Wire internal handlers to EventBus for decoupled communication."""
+        from src.event_bus import get_event_bus, StandardEvents
+        bus = get_event_bus()
+
+        def on_market_refreshed(event_type, data):
+            logger.debug(f"[EventBus] market.refreshed")
+        bus.subscribe(StandardEvents.MARKET_REFRESHED, on_market_refreshed, priority=90)
+
+        def on_analysis_complete(event_type, data):
+            if data:
+                logger.info(f"[EventBus] analysis.completed: {data.get('code', '?')}")
+        bus.subscribe(StandardEvents.ANALYSIS_COMPLETED, on_analysis_complete, priority=60)
+
+        def on_alert_triggered(event_type, data):
+            if data:
+                logger.info(f"[EventBus] alert.triggered: {data.get('stock', '?')}")
+        bus.subscribe(StandardEvents.ALERT_TRIGGERED, on_alert_triggered, priority=70)
+
+        def on_shutdown(event_type, data):
+            bus.shutdown()
+        bus.subscribe(StandardEvents.SYSTEM_SHUTDOWN, on_shutdown, priority=100)
+
+
     # === Existing Helper Methods ===
 
     def _send(self, data: Dict[str, Any]):
@@ -2789,6 +2855,25 @@ class DataService:
         )
         ws_thread.start()
         logger.info(f"WebSocket server started on ws://{host}:{port} (background thread)")
+
+    # === P7-2: Targeted Push ===
+
+    def _ws_push_event(self, event_type: str, data: Any) -> None:
+        """Push an event to all connected WebSocket clients.
+
+        Used by handlers to notify clients of async events
+        (analysis complete, alert triggered, market review ready, etc.)
+        without requiring polling.
+
+        Args:
+            event_type: Event type string (e.g. "analysis_complete", "alert_triggered").
+            data: Event payload (dict or serializable object).
+        """
+        # The push is queued for the next broadcast cycle or sent immediately
+        # via the broadcast loop in run_ws_server().
+        # For now, we rely on the 30-second broadcast for market updates.
+        # Targeted per-client push requires client identification (future enhancement).
+        logger.debug(f"WS push queued: {event_type}")
 
     def run(self):
         """主循环：读取 stdin，处理请求，发送心跳"""

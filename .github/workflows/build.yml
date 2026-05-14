@@ -65,3 +65,65 @@ jobs:
           files: artifacts/**/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  homebrew-tap:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone tap repo
+        uses: actions/checkout@v4
+        with:
+          repository: mbpz/homebrew-open-daily-stock
+          path: homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: open-daily-stock-macos-latest
+          path: artifacts
+
+      - name: Get info
+        id: info
+        run: |
+          ASSET=$(ls artifacts/*.tar.gz)
+          echo "asset=$ASSET" >> $GITHUB_OUTPUT
+          echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Update formula
+        run: |
+          cd homebrew-tap
+          cat > Formula/open-daily-stock.rb << 'RUBY'
+          # typed: false
+          # frozen_string_literal: true
+
+          class OpenDailyStock < Formula
+            desc "Local-first A-share/HK/US stock analyzer with AI, GUI desktop app"
+            homepage "https://github.com/mbpz/open-daily-stock"
+            url "https://github.com/mbpz/open-daily-stock/releases/download/#{version}/open-daily-stock-macos.tar.gz"
+            sha256 ""
+            license "MIT"
+            depends_on macos: ">= :big_sur"
+
+            def install
+              bin.install "open-daily-stock-gui"
+            end
+
+            test do
+              system "#{bin}/open-daily-stock", "--version"
+            end
+          end
+          RUBY
+
+          # Calculate sha256 from downloaded asset
+          SHA=$(shasum -a 256 artifacts/*.tar.gz | awk '{print $1}')
+          sed -i "s/sha256 \"\"/sha256 \"$SHA\"/" Formula/open-daily-stock.rb
+
+      - name: Commit and push
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/open-daily-stock.rb
+          git diff --staged --quiet || git commit -m "Update open-daily-stock to ${{ steps.info.outputs.version }}"
+          git push
