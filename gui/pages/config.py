@@ -2,6 +2,7 @@
 import flet as ft
 import json
 from pathlib import Path
+from gui.app import VERSION
 from gui.theme import CARD_BG, CARD_BORDER, ACCENT_COLOR, SUCCESS_COLOR, ERROR_COLOR
 from src.config import get_config
 from src.i18n import _, set_language
@@ -32,6 +33,19 @@ class ConfigPage(ft.Container):
         self._load_alerts()
 
         header = ft.Text(_("配置管理"), size=24, weight=ft.FontWeight.BOLD)
+
+        # Version info section
+        version_text = ft.Text(f"当前版本: v{VERSION}", size=14, color=ft.Colors.GREY_400)
+        version_row = ft.Row([
+            version_text,
+            ft.TextButton("检查更新", on_click=self._check_update, icon=ft.Icons.UPDATE),
+        ])
+        version_section = ft.Container(
+            content=ft.Column([version_text, version_row]),
+            padding=15,
+            bgcolor=CARD_BG,
+            border_radius=10,
+        )
 
         config = get_config()
         stock_value = ','.join(config.stock_list) if config.stock_list else ''
@@ -87,6 +101,8 @@ class ConfigPage(ft.Container):
             content=ft.Column([
                 header,
                 ft.Divider(height=2, color=CARD_BORDER),
+                version_section,
+                ft.Container(height=20),
                 api_section,
                 ft.Container(height=20),
                 stock_section,
@@ -410,4 +426,16 @@ class ConfigPage(ft.Container):
             set_language(self._language_dropdown.value)
             self.app.page.show_snack_bar(
                 ft.SnackBar(content=ft.Text(_("语言已切换")), open=True)
+            )
+
+    def _check_update(self, e):
+        """Manually trigger update check"""
+        from src.update_checker import UpdateChecker
+        checker = UpdateChecker(current_version=VERSION)
+        if checker.is_new_version_available():
+            version, notes = checker.get_release_info()
+            self.app._show_update_dialog(version, notes)
+        else:
+            self.page.show_snack_bar(
+                ft.SnackBar(content=ft.Text("已是最新版本"))
             )
