@@ -209,7 +209,7 @@ jobs:
 
       - name: Push Cask to homebrew-tap
         env:
-          TAP_TOKEN: ${{ secrets.TAP_REPO_TOKEN }}
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           ARM_SHA="${{ needs.build-arm64.outputs.arm_sha }}"
