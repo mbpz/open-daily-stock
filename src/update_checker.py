@@ -22,7 +22,7 @@ class UpdateChecker:
             data = response.json()
             self._latest_version = data.get("tag_name", "")
             self._release_notes = data.get("body", "")[:200]
-            return self._latest_version
+            return self._latest_version.strip('v')
         except Exception:
             return None
 

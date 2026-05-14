@@ -10,7 +10,7 @@ def test_check_update_returns_latest_version():
         from src.update_checker import UpdateChecker
         checker = UpdateChecker()
         latest = checker.check_latest_version()
-        assert latest == "v0.5.0"
+        assert latest == "0.5.0"
 
 def test_check_update_detects_new_version():
     with patch('requests.get') as mock_get:
