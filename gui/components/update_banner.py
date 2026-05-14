@@ -1,13 +1,11 @@
 """Update notification banner and dialog"""
 import flet as ft
-from typing import Optional
 
 class UpdateBanner(ft.Container):
     """Banner shown when new version is available"""
 
-    def __init__(self, app, version: str, notes: str, on_download, on_dismiss):
+    def __init__(self, version: str, notes: str, on_download, on_dismiss):
         super().__init__()
-        self.app = app
         self.version = version
         self.notes = notes
         self.on_download = on_download

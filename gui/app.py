@@ -53,8 +53,6 @@ class StockApp:
 
         # Update checker
         self._update_checker = UpdateChecker(current_version=VERSION)
-        self._update_banner = None
-        self._new_version_available = None
 
         # Check for updates on startup if enabled
         self._check_update_on_startup()
