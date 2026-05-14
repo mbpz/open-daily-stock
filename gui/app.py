@@ -377,11 +377,10 @@ class StockApp:
 
     def _check_update(self, e):
         """Check for application updates"""
-        from src.update_service import UpdateService
-        latest, url = UpdateService.check_latest_version()
-        if latest:
-            self.update_status(f"{_('new_version')} {latest}，{_('click_to_update')}")
-            self._pending_update_url = url
+        checker = UpdateChecker(current_version=VERSION)
+        if checker.is_new_version_available():
+            version, notes = checker.get_release_info()
+            self._show_update_dialog(version, notes)
         else:
             self.page.show_snack_bar(
                 ft.SnackBar(content=ft.Text(f"{_('already_latest')} v{VERSION}"), open=True)
