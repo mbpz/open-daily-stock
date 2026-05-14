@@ -10,6 +10,8 @@ from gui.theme import get_theme, set_theme as apply_theme, get_current_theme_nam
 from src.i18n import _
 from src.notification_center import get_notification_center, Notification
 
+from src.update_checker import UpdateChecker
+
 VERSION = "0.2.1"
 from src.service_client import ServiceClient
 from gui.data.task_store import TaskStore
@@ -48,6 +50,14 @@ class StockApp:
 
         # P5-7: Command palette overlay (lazy-init)
         self._command_palette = None
+
+        # Update checker
+        self._update_checker = UpdateChecker(current_version=VERSION)
+        self._update_banner = None
+        self._new_version_available = None
+
+        # Check for updates on startup if enabled
+        self._check_update_on_startup()
 
         # Global keyboard handler for Ctrl+K
         self.page.on_keyboard_event = self._on_keyboard
@@ -401,3 +411,27 @@ class StockApp:
                 self.update_status(_("update_failed"))
         except Exception as ex:
             self.update_status(f"{_('update_failed')}: {ex}")
+
+    def _check_update_on_startup(self):
+        """Check for updates if auto_check is enabled"""
+        config = get_config()
+        if config.auto_check_update:
+            if self._update_checker.is_new_version_available():
+                version, notes = self._update_checker.get_release_info()
+                self._show_update_dialog(version, notes)
+
+    def _show_update_dialog(self, version, notes):
+        """Show update dialog"""
+        def on_download(e):
+            import webbrowser
+            webbrowser.open(f"https://github.com/mbpz/open-daily-stock/releases/tag/v{version}")
+            self.page.dialog = None
+
+        def on_ignore(e):
+            self.page.dialog = None
+
+        from gui.components.update_banner import UpdateDialog
+        dialog = UpdateDialog(version, notes, on_download, on_ignore)
+        self.page.dialog = dialog
+        dialog.open = True
+        self.page.update()
