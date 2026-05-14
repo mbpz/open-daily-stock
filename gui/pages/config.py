@@ -29,6 +29,7 @@ class ConfigPage(ft.Container):
         self._alert_channel_field = None
         self._alerts_list = []
         self._selected_alert_idx = None
+        self._auto_check_enabled = config.auto_check_update
 
         self._load_alerts()
 
@@ -40,8 +41,13 @@ class ConfigPage(ft.Container):
             version_text,
             ft.TextButton("检查更新", on_click=self._check_update, icon=ft.Icons.UPDATE),
         ])
+        auto_check_switch = ft.Switch(
+            label=_("启动时自动检查更新"),
+            value=config.auto_check_update,
+            on_change=self._on_auto_check_change,
+        )
         version_section = ft.Container(
-            content=ft.Column([version_text, version_row]),
+            content=ft.Column([version_text, version_row, auto_check_switch]),
             padding=15,
             bgcolor=CARD_BG,
             border_radius=10,
@@ -370,6 +376,7 @@ class ConfigPage(ft.Container):
             updates['FEISHU_WEBHOOK_URL'] = self._feishu_field.value or ''
         if self._language_dropdown:
             updates['LANGUAGE'] = self._language_dropdown.value or 'zh_CN'
+        updates['AUTO_CHECK_UPDATE'] = str(self._auto_check_enabled).lower()
 
         # Save to .env file
         config = get_config()
@@ -439,3 +446,7 @@ class ConfigPage(ft.Container):
             self.page.show_snack_bar(
                 ft.SnackBar(content=ft.Text("已是最新版本"), open=True)
             )
+
+    def _on_auto_check_change(self, e):
+        """Handle auto check update toggle"""
+        self._auto_check_enabled = e.control.value

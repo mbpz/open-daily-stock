@@ -128,6 +128,9 @@ class Config:
     # === 语言配置 ===
     language: str = "zh"  # 语言偏好: zh / ja / ko
 
+    # === 启动更新检查 ===
+    auto_check_update: bool = True  # 启动时自动检查更新
+
     # === UI 配置 (config.json) ===
     keybindings: Dict[str, Dict[str, str]] = field(default_factory=lambda: {
         "global": {
@@ -466,7 +469,8 @@ class Config:
             # 行情异动提醒配置
             alerts_enabled=os.getenv('ALERTS_ENABLED', 'false').lower() == 'true',
             alerts_threshold_pct=float(os.getenv('ALERTS_THRESHOLD_PCT', '5.0')),
-            language=os.getenv('LANGUAGE', 'zh')
+            language=os.getenv('LANGUAGE', 'zh'),
+            auto_check_update=os.getenv('AUTO_CHECK_UPDATE', 'true').lower() == 'true'
         )
         # 从 config.json 加载 UI 配置（keybindings, theme）
         cls.load_json_config(config)
@@ -633,6 +637,8 @@ class Config:
             self.feishu_webhook_url = updates['FEISHU_WEBHOOK_URL']
         if 'LANGUAGE' in updates:
             self.language = updates['LANGUAGE']
+        if 'AUTO_CHECK_UPDATE' in updates:
+            self.auto_check_update = updates['AUTO_CHECK_UPDATE'].lower() == 'true'
 
     def is_demo_mode(self) -> bool:
         """
