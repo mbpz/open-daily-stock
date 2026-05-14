@@ -436,8 +436,8 @@ class TestMultiAgentOrchestrator:
         orchestrator = MultiAgentOrchestrator(mock_analyzer)
         result = orchestrator.analyze("600519", sample_context)
 
-        # Should have called API for each of the 3 specialists + 1 synthesizer
-        assert mock_analyzer._call_api_with_retry.call_count == 4
+        # Should have called API for each of the 4 specialists + 1 synthesizer
+        assert mock_analyzer._call_api_with_retry.call_count == 5
         # Result should be the mock AnalysisResult
         assert result.code == "600519"
         assert result.success is True

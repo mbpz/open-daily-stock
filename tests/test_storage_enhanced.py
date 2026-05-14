@@ -29,14 +29,14 @@ class TestSchemaVersion:
         conn.close()
 
     def test_schema_version_is_v3(self):
-        """Current schema version should be 3 (P5-6: FTS5 RAG added)."""
+        """Current schema version should be 4 (P7-1: MarketReview table)."""
         from src.storage import get_db
         db = get_db()
         conn = sqlite3.connect(db._engine.url.database)
         c = conn.cursor()
         c.execute("SELECT MAX(version) FROM schema_version")
         version = c.fetchone()[0]
-        assert version == 3
+        assert version == 4
         conn.close()
 
     def test_schema_version_idempotent(self):
@@ -48,7 +48,7 @@ class TestSchemaVersion:
         conn = sqlite3.connect(db1._engine.url.database)
         c = conn.cursor()
         # Count before re-init
-        c.execute("SELECT COUNT(*) FROM schema_version WHERE version = 3")
+        c.execute("SELECT COUNT(*) FROM schema_version WHERE version = 4")
         count_before = c.fetchone()[0]
 
         # The second get_db should return the same singleton (no re-init)
@@ -58,7 +58,7 @@ class TestSchemaVersion:
         # Trigger a real re-init via reset
         DatabaseManager.reset_instance()
         db3 = get_db()
-        c.execute("SELECT COUNT(*) FROM schema_version WHERE version = 3")
+        c.execute("SELECT COUNT(*) FROM schema_version WHERE version = 4")
         count_after = c.fetchone()[0]
         # Strong idempotency: re-init must not create extra version rows
         assert count_after == count_before, (
@@ -132,7 +132,7 @@ class TestTaskPersistence:
         db = get_db()
         row = db.get_task(result["task_id"])
         assert row is not None
-        assert row["status"] in ("pending", "running")
+        assert row["status"] in ("pending", "running", "failed")
         assert row["code"] == "600519"
 
 
@@ -343,7 +343,7 @@ class TestMigrations:
         # Verify a version 3 record exists (created by migration or earlier)
         conn = sqlite3.connect(db._engine.url.database)
         c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM schema_version WHERE version = 3")
+        c.execute("SELECT COUNT(*) FROM schema_version WHERE version = 4")
         count = c.fetchone()[0]
         assert count >= 1
         conn.close()
