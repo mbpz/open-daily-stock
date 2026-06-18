@@ -28,6 +28,7 @@ from tenacity import (
 )
 
 from ..base import BaseChannel, ChannelPriority, ChannelResult
+from .._chunking import get_bytes as _get_bytes, truncate_to_bytes as _truncate_to_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -40,28 +41,6 @@ _FORCE_CHUNK_INTERVAL = 1.0
 _PAGE_MARKER_RESERVE = 100
 # 单 section 强制截断时预留的提示字节
 _TRUNCATE_RESERVE = 200
-
-
-def _get_bytes(s: str) -> int:
-    """字符串的 UTF-8 字节数。"""
-    return len(s.encode("utf-8"))
-
-
-def _truncate_to_bytes(text: str, max_bytes: int) -> str:
-    """按字节数截断字符串，确保不会在多字节字符中间截断。
-
-    迁自旧 _truncate_to_bytes。
-    """
-    encoded = text.encode("utf-8")
-    if len(encoded) <= max_bytes:
-        return text
-    truncated = encoded[:max_bytes]
-    while truncated:
-        try:
-            return truncated.decode("utf-8")
-        except UnicodeDecodeError:
-            truncated = truncated[:-1]
-    return ""
 
 
 def _smart_split(content: str) -> Tuple[Optional[List[str]], Optional[str]]:
