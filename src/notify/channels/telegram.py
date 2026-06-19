@@ -14,12 +14,14 @@ _convert_to_telegram_markdown。
 - **解析失败 fallback**：API 返回 parse/markdown 错误时，同请求内改纯文本重试（不消耗 tenacity 重试次数）
 - 智能分块按 `\\n---\\n`；都不命中时整段发送（沿用旧行为）
 - tenacity retry 3 次指数退避
+- 块间 sleep(0.5) 防 Telegram rate limit（30 msg/s）
 - disable_web_page_preview=True 禁止链接预览展开
 """
 from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import List
 
 import requests
@@ -202,6 +204,9 @@ class TelegramChannel(BaseChannel):
             else:
                 last_error = r.error or "未知错误"
                 logger.error(f"Telegram 第 {i + 1}/{total} 批发送失败: {last_error}")
+
+            if i < total - 1:
+                time.sleep(0.5)
 
         if success_count == total:
             return ChannelResult(

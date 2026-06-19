@@ -26,7 +26,11 @@ from data_provider import DataFetcherManager
 from data_provider.realtime_types import ChipDistribution
 from src.analyzer import GeminiAnalyzer, AnalysisResult, STOCK_NAME_MAP
 from src.notify import NotificationService
-from src.notify.reports import generate_wechat_dashboard
+from src.notify.reports import (
+    generate_dashboard_report,
+    generate_single_stock_report,
+    generate_wechat_dashboard,
+)
 from src.notify.types import BotMessage, NotificationChannel
 from src.search_service import SearchService
 from src.enums import ReportType
@@ -460,15 +464,14 @@ class StockAnalysisPipeline:
                     try:
                         # 根据报告类型选择生成方法
                         if report_type == ReportType.FULL:
-                            # 完整报告：使用决策仪表盘格式
-                            report_content = self.notifier.generate_dashboard_report([result])
+                            report_content = generate_dashboard_report([result])
                             logger.info(f"[{code}] 使用完整报告格式")
                         else:
-                            # 精简报告：使用单股报告格式（默认）
-                            report_content = self.notifier.generate_single_stock_report(result)
+                            report_content = generate_single_stock_report(result)
                             logger.info(f"[{code}] 使用精简报告格式")
-                        
-                        if self.notifier.send(report_content):
+
+                        send_results = self.notifier.send(report_content)
+                        if any(r.success for r in send_results):
                             logger.info(f"[{code}] 单股推送成功")
                         else:
                             logger.warning(f"[{code}] 单股推送失败")
@@ -620,7 +623,7 @@ class StockAnalysisPipeline:
             logger.info("生成决策仪表盘日报...")
             
             # 生成决策仪表盘格式的详细日报
-            report = self.notifier.generate_dashboard_report(results)
+            report = generate_dashboard_report(results)
             
             # 保存到本地
             filepath = self.notifier.save_report_to_file(report)

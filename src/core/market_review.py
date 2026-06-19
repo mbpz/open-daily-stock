@@ -65,8 +65,8 @@ def run_market_review(
                 # 添加标题
                 report_content = f"🎯 大盘复盘\n\n{review_report}"
                 
-                success = notifier.send(report_content)
-                if success:
+                results = notifier.send(report_content)
+                if any(r.success for r in results):
                     logger.info("大盘复盘推送成功")
                 else:
                     logger.warning("大盘复盘推送失败")

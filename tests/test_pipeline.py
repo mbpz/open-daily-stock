@@ -277,7 +277,16 @@ class TestPipelineAnalyze:
 class TestPipelineNotify:
     """Pipeline 通知功能测试"""
 
-    def test_send_notifications_success(self, mock_config):
+    @pytest.fixture
+    def mock_report_generator(self):
+        """generate_dashboard_report 现已是 module-level 函数（src.notify.reports），
+        不是 notifier 的方法。Mock 在 src.core.pipeline 这个名字下。
+        """
+        with patch("src.core.pipeline.generate_dashboard_report", return_value="仪表盘报告") as m:
+            yield m
+
+    def test_send_notifications_success(self, mock_config, mock_report_generator):
+        """测试成功发送通知"""
         """测试成功发送通知"""
         pipeline = StockAnalysisPipeline(config=mock_config, max_workers=2)
 
@@ -294,7 +303,6 @@ class TestPipelineNotify:
         pipeline.notifier = MagicMock()
         pipeline.notifier.is_available.return_value = True
         pipeline.notifier.get_available_channels.return_value = []
-        pipeline.notifier.generate_dashboard_report.return_value = "仪表盘报告"
         pipeline.notifier.save_report_to_file.return_value = "/path/to/report.txt"
         pipeline.notifier.send_to_context.return_value = True
 
@@ -302,11 +310,11 @@ class TestPipelineNotify:
         pipeline._send_notifications([mock_result])
 
         # 验证
-        pipeline.notifier.generate_dashboard_report.assert_called_once()
+        mock_report_generator.assert_called_once()
         pipeline.notifier.save_report_to_file.assert_called_once()
         pipeline.notifier.send_to_context.assert_called_once()
 
-    def test_send_notifications_skip_push(self, mock_config):
+    def test_send_notifications_skip_push(self, mock_config, mock_report_generator):
         """测试跳过推送（单股推送模式）"""
         pipeline = StockAnalysisPipeline(config=mock_config, max_workers=2)
 
@@ -321,7 +329,6 @@ class TestPipelineNotify:
         # Mock notifier
         pipeline.notifier = MagicMock()
         pipeline.notifier.is_available.return_value = True
-        pipeline.notifier.generate_dashboard_report.return_value = "仪表盘报告"
         pipeline.notifier.save_report_to_file.return_value = "/path/to/report.txt"
 
         # 执行 - 跳过推送
@@ -331,7 +338,7 @@ class TestPipelineNotify:
         pipeline.notifier.save_report_to_file.assert_called_once()
         pipeline.notifier.send_to_context.assert_not_called()
 
-    def test_send_notifications_not_available(self, mock_config):
+    def test_send_notifications_not_available(self, mock_config, mock_report_generator):
         """测试通知渠道不可用"""
         pipeline = StockAnalysisPipeline(config=mock_config, max_workers=2)
 
@@ -346,7 +353,6 @@ class TestPipelineNotify:
         # Mock notifier - 不可用
         pipeline.notifier = MagicMock()
         pipeline.notifier.is_available.return_value = False
-        pipeline.notifier.generate_dashboard_report.return_value = "仪表盘报告"
         pipeline.notifier.save_report_to_file.return_value = "/path/to/report.txt"
 
         # 执行
@@ -356,7 +362,7 @@ class TestPipelineNotify:
         pipeline.notifier.save_report_to_file.assert_called_once()
         pipeline.notifier.send_to_context.assert_not_called()
 
-    def test_send_notifications_with_wechat(self, mock_config):
+    def test_send_notifications_with_wechat(self, mock_config, mock_report_generator):
         """测试企业微信通知（新契约：send_to_channel / 字符串 key）。"""
         from unittest.mock import MagicMock as MM
 
@@ -386,20 +392,19 @@ class TestPipelineNotify:
                         if c.args[0] == "wechat"]
         assert len(wechat_calls) >= 1
 
-    def test_send_notifications_empty_results(self, mock_config):
+    def test_send_notifications_empty_results(self, mock_config, mock_report_generator):
         """测试空结果列表"""
         pipeline = StockAnalysisPipeline(config=mock_config, max_workers=2)
 
         pipeline.notifier = MagicMock()
         pipeline.notifier.is_available.return_value = True
-        pipeline.notifier.generate_dashboard_report.return_value = "空报告"
         pipeline.notifier.save_report_to_file.return_value = "/path/to/report.txt"
 
         # 执行 - 空列表
         pipeline._send_notifications([])
 
         # 验证 - 生成报告并尝试推送（is_available=True 时会发送）
-        pipeline.notifier.generate_dashboard_report.assert_called_once_with([])
+        mock_report_generator.assert_called_once_with([])
         pipeline.notifier.save_report_to_file.assert_called_once()
         pipeline.notifier.send_to_context.assert_called_once()
 
@@ -418,7 +423,11 @@ class TestPipelineNotify:
         # Mock notifier - 抛出异常
         pipeline.notifier = MagicMock()
         pipeline.notifier.is_available.return_value = True
-        pipeline.notifier.generate_dashboard_report.side_effect = Exception("Report generation failed")
 
-        # 执行 - 不应抛出异常
-        pipeline._send_notifications([mock_result])
+        # generate_dashboard_report 现已是 module-level 函数，mock 也在 module-level
+        with patch(
+            "src.core.pipeline.generate_dashboard_report",
+            side_effect=Exception("Report generation failed"),
+        ):
+            # 执行 - 不应抛出异常
+            pipeline._send_notifications([mock_result])
