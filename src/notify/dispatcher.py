@@ -72,8 +72,10 @@ class NotificationDispatcher:
         if custom_urls:
             self._channels["custom"] = CustomChannel(self.config)
 
-        # Windows Toast（平台门控在 channel 内部）
-        self._channels["windows"] = WindowsToastChannel(self.config)
+        # Windows Toast — 仅平台支持时才添加（channel.is_configured() 做平台门控）
+        win = WindowsToastChannel(self.config)
+        if win.is_configured():
+            self._channels["windows"] = win
 
         logger.info(f"已初始化 {len(self._channels)} 个通知渠道")
 

@@ -38,18 +38,20 @@ def test_lightweight_types_from_legacy_module_no_warning():
     )
 
 
-def test_notification_service_access_emits_deprecation_warning():
-    """Touching NotificationService must emit exactly one DeprecationWarning."""
+def test_notification_service_import_clean_no_warning():
+    """P0-2 迁移完成后，从 src.notification 导入 NotificationService 不应有警告。
+
+    src/notification.py 现在是纯 re-export shim — 双向兼容，无 deprecation 阻吓。
+    """
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        from src.notification import NotificationService
+        from src.notification import NotificationService  # noqa: F811
 
-    deprecations = [x for x in w if issubclass(x.category, DeprecationWarning)
-                    and "NotificationService" in str(x.message)]
-    assert len(deprecations) >= 1
-    msg = str(deprecations[0].message)
-    assert "deprecated" in msg.lower()
-    assert "src.notify" in msg
+    deprecations = [x for x in w if issubclass(x.category, DeprecationWarning)]
+    assert deprecations == [], (
+        f"迁移已完成，不应有 DeprecationWarning: "
+        f"{[str(x.message) for x in deprecations]}"
+    )
 
 
 def test_notification_service_is_real_class():
