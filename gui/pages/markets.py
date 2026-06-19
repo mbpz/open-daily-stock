@@ -1,7 +1,8 @@
 """行情页面"""
-import flet as ft
 import asyncio
+import flet as ft
 from datetime import datetime
+from gui.components.async_task import AsyncTaskMixin
 from gui.theme import SUCCESS_COLOR, ERROR_COLOR, TEXT_SECONDARY, CARD_BG, CARD_BORDER, WARNING_COLOR
 from src.i18n import _
 from src.shared.style import format_volume as _format_volume
@@ -24,11 +25,13 @@ def format_volume_display(volume: float, code: str) -> str:
     return _format_volume(volume, code)
 
 
-class MarketsPage(ft.Container):
+class MarketsPage(AsyncTaskMixin, ft.Container):
     """行情展示页面"""
 
     def __init__(self, app, service_client):
-        super().__init__()
+        # Init base container + mixin first (cancellable background tasks)
+        ft.Container.__init__(self)
+        AsyncTaskMixin.__init__(self, app)
         self.app = app
         self._client = service_client
         self._previous_data = {}
@@ -53,17 +56,6 @@ class MarketsPage(ft.Container):
                     border_radius=5,
                 )
             )
-
-        # 标题栏
-        header = ft.Row([
-            ft.Text(_("自选股行情"), size=24, weight=ft.FontWeight.BOLD),
-            ft.Container(expand=True),
-            ft.IconButton(
-                icon=ft.Icons.REFRESH,
-                on_click=self._refresh,
-                tooltip=_("刷新"),
-            ),
-        ])
 
         # 标题栏
         header = ft.Row([
@@ -108,8 +100,8 @@ class MarketsPage(ft.Container):
         )
 
     def on_mount(self):
-        """生命周期钩子 - 页面挂载时触发异步数据获取"""
-        self.app.page.run_task(self._fetch_and_update)
+        """Lifecycle hook — fetch initial data via the mixin so it's cancellable."""
+        self.run_async(self._fetch_and_update)
 
     def _show_placeholder(self):
         """显示加载占位符"""
@@ -198,25 +190,41 @@ class MarketsPage(ft.Container):
                 content._show_chart(None)  # 自动触发显示
 
     async def _fetch_and_update(self):
-        """异步获取数据并更新界面"""
-        markets = self._client.get_markets()
-        self.table.rows.clear()
-        self._load_data(markets)
-        self.update()
-        self.app.update_status(datetime.now().strftime("%H:%M:%S"))
+        """Fetch market data and update the table — honour cancellation."""
+        try:
+            if self.check_cancelled():
+                return
+            # run_async already set busy; no progress ring here so no-op.
+            markets = self._client.get_markets()
+            if self.check_cancelled():
+                return
+            self.table.rows.clear()
+            self._load_data(markets)
+            self.update()
+            self.app.update_status(datetime.now().strftime("%H:%M:%S"))
+        finally:
+            # Even if we never had a busy indicator, run_async's done
+            # callback will set_idle for us; but be explicit for clarity.
+            self.set_idle()
 
     def _schedule_flash_clear(self):
-        """Schedule flash clear after 300ms"""
-        import threading
-        def clear():
-            import time
-            time.sleep(0.3)
+        """Schedule flash clear after 300ms via the mixin (cancellable)."""
+        self.run_async(self._clear_flash_after_delay)
+
+    async def _clear_flash_after_delay(self):
+        try:
+            await asyncio.sleep(0.3)
+            if self.check_cancelled():
+                return
             self._flash_indices = set()
-            self.app.page.run_task(self._fetch_and_update)
-        t = threading.Thread(target=clear)
-        t.daemon = True
-        t.start()
+            if self._table_container.page is not None:
+                self._table_container.update()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            # Swallow: page teardown is non-fatal
+            pass
 
     def _refresh(self, e):
-        """刷新数据"""
-        self.app.page.run_task(self._fetch_and_update)
+        """Refresh — delegate to mixin for cancellation + busy state."""
+        self.run_async(self._fetch_and_update)

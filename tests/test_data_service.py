@@ -14,7 +14,7 @@ class TestDataService:
             stderr=subprocess.PIPE
         )
         # 发送 hello 请求
-        req = json.dumps({"action": "hello"})
+        req = json.dumps({"action": "hello"}) + "\n"
         proc.stdin.write(req.encode())
         proc.stdin.flush()
         proc.stdin.close()  # Close stdin to signal EOF
@@ -35,7 +35,7 @@ class TestDataService:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
-        req = json.dumps({"action": "get_markets"})
+        req = json.dumps({"action": "get_markets"}) + "\n"
         proc.stdin.write(req.encode())
         proc.stdin.flush()
         proc.stdin.close()  # Close stdin to signal EOF

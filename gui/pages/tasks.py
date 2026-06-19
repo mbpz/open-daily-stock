@@ -1,5 +1,7 @@
 """任务历史页面"""
 import flet as ft
+import logging
+logger = logging.getLogger(__name__)
 import json
 from gui.theme import CARD_BG, CARD_BORDER, TEXT_SECONDARY, SUCCESS_COLOR, WARNING_COLOR, ERROR_COLOR, DONE_BG
 from src.i18n import _
@@ -191,7 +193,8 @@ class TasksPage(ft.Container):
 
         try:
             result_data = json.loads(record.result_json)
-        except:
+        except (ValueError, TypeError) as e:
+            logger.warning(f"解析任务结果 JSON 失败 (task_id={record.task_id}): {e}")
             return
 
         # Build detail content

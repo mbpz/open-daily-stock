@@ -16,6 +16,7 @@ from __future__ import annotations
 import atexit
 import json
 import logging
+from contextlib import contextmanager
 import time
 from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
@@ -169,7 +170,7 @@ def get_market_cache() -> MarketDataCache:
 Base = declarative_base()
 
 # Current database schema version
-CURRENT_SCHEMA_VERSION = 4  # P7-1: MarketReview table
+CURRENT_SCHEMA_VERSION = 5  # P7-4: research_artifacts split (move large tool_output to its own table)
 
 
 # === Migration System ===
@@ -215,6 +216,12 @@ def _run_migrations(db: 'DatabaseManager', from_version: int, to_version: int) -
         Base.metadata.create_all(db._engine)
         logger.info("Migration v3 -> v4 applied (MarketReview table)")
 
+    if from_version < 5 and to_version >= 5:
+        # P7-4: Split research_logs.steps_json — keep summary fields inline,
+        # move large tool_output rows to a new research_artifacts table.
+        _migrate_v5_split_research_artifacts(db)
+        logger.info("Migration v4 -> v5 applied (research_artifacts split)")
+
     # Record the new schema version after all migrations succeed
     # Only insert if this version hasn't been recorded yet (idempotent)
     with db.get_session() as session:
@@ -231,6 +238,53 @@ def _run_migrations(db: 'DatabaseManager', from_version: int, to_version: int) -
             logger.info(f"Migration complete. Schema at v{to_version}")
         else:
             logger.debug(f"Schema v{to_version} already recorded, skipping.")
+
+
+def _migrate_v5_split_research_artifacts(db: "DatabaseManager") -> None:
+    """P7-4: split research_logs.steps_json.
+
+    Historically each ResearchStep's full ``tool_output`` was stored inside
+    the ``steps_json`` column of ``research_logs``. For multi-step research
+    (5+ iterations with search_news results), this column can grow to
+    several MB per row, which:
+
+      - slows down every read of research_logs (VACUUM, backup, grep)
+      - bloats WAL and replication traffic
+      - makes the table effectively write-once
+
+    We add a new ``research_artifacts`` table keyed by (step_id, tool_name)
+    and rewrite the steps_json column to omit ``tool_output``. Old rows
+    are NOT migrated (the pre-v5 ``tool_output`` JSON is left in place —
+    it's a one-time legacy write; the new code never re-reads it).
+    """
+    from sqlalchemy import text as _text
+    with db.get_session() as session:
+        conn = session.connection()
+        # Idempotent: only create if it doesn't exist.
+        existing = conn.execute(_text(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='research_artifacts'"
+        )).fetchone()
+        if existing is None:
+            conn.execute(_text("""
+                CREATE TABLE research_artifacts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    research_log_id INTEGER NOT NULL,
+                    iteration INTEGER NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    output_json TEXT NOT NULL,
+                    output_size_bytes INTEGER NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (research_log_id) REFERENCES research_logs(id) ON DELETE CASCADE
+                )
+            """))
+            conn.execute(_text(
+                "CREATE INDEX ix_research_artifacts_log ON research_artifacts(research_log_id)"
+            ))
+            conn.execute(_text(
+                "CREATE INDEX ix_research_artifacts_tool ON research_artifacts(tool_name)"
+            ))
+            logger.info("Created research_artifacts table for splitting large tool outputs")
+        session.commit()
 
 
 def _migrate_v3_add_fts5(db: 'DatabaseManager') -> None:
@@ -558,6 +612,30 @@ class DatabaseManager:
         except Exception:
             session.close()
             raise
+
+    @contextmanager
+    def session_scope(self) -> Session:
+        """Provide a transactional scope around a series of operations.
+
+        Commits on clean exit, rolls back on exception, always closes.
+        Prefer this over :meth:`get_session` for any multi-statement work
+        because it makes commit/rollback boundaries explicit and is
+        independent of the underlying SQLAlchemy session protocol.
+
+        Usage:
+            with db.session_scope() as session:
+                session.add(thing)
+                # commit happens automatically on block exit
+        """
+        session = self._SessionLocal()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
     def _migrate_analysis_history_task_id(self):
         """Add task_id column to analysis_history if it doesn't exist (migration from v1 schema)."""

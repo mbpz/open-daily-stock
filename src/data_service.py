@@ -21,9 +21,92 @@ from .financials import FinancialDataFetcher, _safe_float
 logger = logging.getLogger(__name__)
 
 # ============================================================
+# Error model: handlers raise DataServiceError for known/expected
+# failures (validation, not-found, upstream 4xx). Anything else is
+# treated as a bug: we log the traceback with a request_id and
+# return a sanitized message so internal details (file paths, SQL,
+# env vars) never leak to the GUI client.
+# ============================================================
+
+
+class DataServiceError(Exception):
+    """Base class for known/expected errors that should be surfaced to clients.
+
+    Subclasses map to stable error codes so the GUI can branch on them
+    without parsing English messages.
+    """
+
+    code: str = "internal_error"
+
+    def __init__(self, message: str, *, code: str | None = None, http_status: int | None = None):
+        super().__init__(message)
+        if code is not None:
+            self.code = code
+        self.http_status = http_status
+
+
+class BadRequestError(DataServiceError):
+    code = "bad_request"
+
+
+class NotFoundError(DataServiceError):
+    code = "not_found"
+
+
+class UpstreamError(DataServiceError):
+    code = "upstream_error"
+
+
+class TimeoutError_(DataServiceError):  # noqa: A001  (shadows builtin on purpose)
+    code = "timeout"
+
+
+import uuid as _uuid
+import traceback as _traceback
+
+
+def _safe_call(handler, req: Dict[str, Any]) -> Dict[str, Any]:
+    """Invoke a handler with structured error handling.
+
+    Returns:
+        dict with at least {"status": "ok"|"error"}.
+        On error: also includes "code" (stable id) and "message" (safe for UI).
+        On unexpected exception: includes "request_id" that can be grepped in logs.
+    """
+    action = req.get("action", "?")
+    try:
+        return handler(req)
+    except DataServiceError as e:
+        logger.warning(f"[{action}] known error ({e.code}): {e}")
+        return {
+            "status": "error",
+            "code": e.code,
+            "message": str(e),
+        }
+    except Exception as e:
+        request_id = _uuid.uuid4().hex[:12]
+        logger.error(
+            f"[{action}] unexpected error (request_id={request_id}): {e}",
+            exc_info=True,
+        )
+        return {
+            "status": "error",
+            "code": "internal_error",
+            "message": f"内部错误，请稍后重试（request_id={request_id}）",
+            "request_id": request_id,
+        }
+
+
+# ============================================================
 # Request Timeout and Thread Pool Configuration
 # ============================================================
 REQUEST_TIMEOUT_SECONDS = 30  # Default timeout per request
+
+# Maximum bytes we'll accept for a single IPC request frame. Real client
+# payloads are < 100 KB; 1 MB is a hard ceiling to prevent a misbehaving
+# or hostile client from making us allocate gigabytes via readline().
+MAX_REQUEST_BYTES = 1 * 1024 * 1024  # 1 MB
+MAX_ACTION_LENGTH = 64
 MAX_CONCURRENT_REQUESTS = 5   # Max concurrent requests
 HEARTBEAT_INTERVAL = 30        # Seconds between heartbeats
 
@@ -50,6 +133,7 @@ class DataService:
 
     def __init__(self):
         self._running = True
+        self._current_request_id: Optional[str] = None
         # Initialize database via storage.py (ensures all schema tables exist)
         get_db()
         self._alert_service = AlertService()
@@ -156,27 +240,44 @@ class DataService:
         return get_config().is_demo_mode()
 
     def _handle_request(self, req: Dict[str, Any]) -> Dict[str, Any]:
-        """根据 action 分发到对应 handler with timeout protection"""
+        """根据 action 分发到对应 handler with timeout + sanitized error."""
         action = req.get("action", "")
 
         if action not in self._actions:
-            return {"status": "error", "message": f"不支持的操作: {action}"}
+            return {
+                "status": "error",
+                "code": "bad_request",
+                "message": f"不支持的操作: {action}",
+            }
 
         handler_name = self._actions[action]
         handler: ActionHandler = getattr(self, handler_name)
 
-        # Submit to thread pool with timeout
         timeout = req.get("_timeout", REQUEST_TIMEOUT_SECONDS)
-        future = self._executor.submit(handler, req)
+        future = self._executor.submit(_safe_call, handler, req)
 
         try:
             return future.result(timeout=timeout)
         except FuturesTimeoutError:
             logger.warning(f"请求 {action} 超时（{timeout}秒）")
-            return {"status": "error", "message": f"请求超时（{timeout}秒）"}
+            return {
+                "status": "error",
+                "code": "timeout",
+                "message": f"请求超时（{timeout}秒）",
+            }
+        # Anything raised from _safe_call itself (shouldn't happen) is a bug.
         except Exception as e:
-            logger.error(f"处理请求 {action} 时发生异常: {e}")
-            return {"status": "error", "message": str(e)}
+            request_id = _uuid.uuid4().hex[:12]
+            logger.error(
+                f"[{action}] dispatcher error (request_id={request_id}): {e}",
+                exc_info=True,
+            )
+            return {
+                "status": "error",
+                "code": "internal_error",
+                "message": f"内部错误（request_id={request_id}）",
+                "request_id": request_id,
+            }
 
     # === Existing Handlers ===
 
@@ -2905,7 +3006,11 @@ class DataService:
         logger.debug(f"WS push queued: {event_type}")
 
     def run(self):
-        """主循环：读取 stdin，处理请求，发送心跳"""
+        """主循环：读取 stdin，处理请求，发送心跳
+
+        协议：每行一条 JSON 请求。读取时强制字节上限 (MAX_REQUEST_BYTES)，
+        防止恶意/异常 client 用超长单行撑爆内存。
+        """
         # Start WebSocket IPC server in background daemon thread (P5-1)
         self._start_ws_server()
 
@@ -2913,28 +3018,103 @@ class DataService:
         heartbeat_interval = HEARTBEAT_INTERVAL
 
         while self._running:
-            # 计算距上次心跳的时间
             elapsed = time.time() - last_heartbeat
-
-            # 发送心跳（每 HEARTBEAT_INTERVAL 秒）
             if elapsed >= heartbeat_interval:
                 self._send_heartbeat()
                 last_heartbeat = time.time()
 
-            # 使用非阻塞方式读取 stdin（设置超时避免 busy loop）
             import select
-            if select.select([sys.stdin], [], [], 0.5)[0]:
-                line = sys.stdin.readline()
-                if not line:
+            ready, _, _ = select.select([sys.stdin], [], [], 0.5)
+            if not ready:
+                continue
+
+            frame = self._read_request_frame()
+            if frame is None:
+                # EOF or fatal protocol error; loop will exit on next iteration.
+                if not self._running:
                     break
-                try:
-                    req = json.loads(line)
-                    resp = self._handle_request(req)
-                    self._send(resp)
-                except json.JSONDecodeError:
-                    self._send({"status": "error", "message": "invalid json"})
-                except Exception as e:
-                    self._send({"status": "error", "message": str(e)})
+                continue
+
+            try:
+                req = json.loads(frame)
+            except json.JSONDecodeError:
+                self._send({"status": "error", "code": "bad_request", "message": "invalid json"})
+                continue
+
+            if not isinstance(req, dict):
+                self._send({"status": "error", "code": "bad_request", "message": "request must be a JSON object"})
+                continue
+
+            # Propagate the client-supplied request_id so the client can
+            # correlate responses when it pipelines multiple requests.
+            request_id = req.get("request_id")
+            if isinstance(request_id, str) and len(request_id) <= 64:
+                self._current_request_id = request_id
+            else:
+                self._current_request_id = None
+
+            try:
+                resp = self._handle_request(req)
+            except Exception:
+                # Defence-in-depth: _handle_request already wraps handlers in
+                # _safe_call, so reaching here is a bug. Log and return a
+                # sanitized error rather than crashing the daemon.
+                request_id = _uuid.uuid4().hex[:12]
+                logger.exception("未捕获异常 in _handle_request")
+                resp = {
+                    "status": "error",
+                    "code": "internal_error",
+                    "message": f"内部错误（request_id={request_id}）",
+                    "request_id": request_id,
+                }
+            finally:
+                self._current_request_id = None
+
+            if self._current_request_id:
+                resp["request_id"] = self._current_request_id
+            self._send(resp)
+
+    def _read_request_frame(self) -> Optional[bytes]:
+        """Read exactly one newline-terminated request frame, capped at MAX_REQUEST_BYTES.
+
+        Returns:
+            The frame bytes (without the trailing newline) on success.
+            None on EOF or on protocol violation; the caller decides whether
+            to shut down or continue.
+        """
+        buf = bytearray()
+        while True:
+            chunk = sys.stdin.buffer.read1(4096) if hasattr(sys.stdin.buffer, "read1") else sys.stdin.buffer.read(4096)
+            if not chunk:
+                # EOF
+                if buf:
+                    logger.warning("stdin 在帧中间关闭，丢弃部分数据")
+                self._running = False
+                return None
+            buf.extend(chunk)
+            # Newline-terminated frame?
+            nl = buf.find(b"\n")
+            if nl != -1:
+                frame = bytes(buf[:nl])
+                # Push the rest back to stdin for the next iteration.
+                # (Python's stdin is a buffered text stream; we don't try to
+                # push back bytes — instead we leave them in the buffer for
+                # the next read1() call. The newline frame delimiter is
+                # the contract.)
+                return frame
+            if len(buf) > MAX_REQUEST_BYTES:
+                # Drain until newline so the next frame can be parsed.
+                logger.warning(
+                    f"收到的请求超过 {MAX_REQUEST_BYTES} 字节上限，已丢弃"
+                )
+                # Consume up to the next newline so we stay in sync.
+                sys.stdin.buffer.readline()
+                self._send({
+                    "status": "error",
+                    "code": "payload_too_large",
+                    "message": f"request exceeds {MAX_REQUEST_BYTES} bytes",
+                })
+                return b""
 
 if __name__ == "__main__":
     service = DataService()

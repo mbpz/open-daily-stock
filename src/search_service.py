@@ -257,7 +257,8 @@ class TavilySearchProvider(BaseSearchProvider):
             parsed = urlparse(url)
             domain = parsed.netloc.replace('www.', '')
             return domain or '未知来源'
-        except:
+        except Exception as e:
+            logger.debug(f"提取域名失败 ({url!r}): {e}")
             return '未知来源'
 
 
@@ -340,7 +341,8 @@ class SerpAPISearchProvider(BaseSearchProvider):
             from urllib.parse import urlparse
             parsed = urlparse(url)
             return parsed.netloc.replace('www.', '') or '未知来源'
-        except:
+        except Exception as e:
+            logger.debug(f"提取域名失败 ({url!r}): {e}")
             return '未知来源'
 
 
@@ -403,7 +405,8 @@ class BochaSearchProvider(BaseSearchProvider):
                         error_message = error_data.get('message', response.text)
                     else:
                         error_message = response.text
-                except:
+                except Exception as e:
+                    logger.debug(f"解析错误响应失败: {e}")
                     error_message = response.text
                 
                 # 根据错误码处理
@@ -526,7 +529,8 @@ class BochaSearchProvider(BaseSearchProvider):
             parsed = urlparse(url)
             domain = parsed.netloc.replace('www.', '')
             return domain or '未知来源'
-        except:
+        except Exception as e:
+            logger.debug(f"提取域名失败 ({url!r}): {e}")
             return '未知来源'
 
 

@@ -499,10 +499,26 @@ JSON格式回复（不要加markdown）：
         return "\n".join(lines)
 
     def _save_report(self, report: ResearchReport) -> None:
-        """Persist research report to SQLite."""
+        """Persist research report to SQLite.
+
+        Schema (P7-4):
+          - ``research_logs`` stores metadata + a slim ``steps_json``
+            (no ``tool_output`` field, which may be a multi-KB dict
+            from search_news / get_financials / etc.).
+          - ``research_artifacts`` stores each step's full ``tool_output``
+            as a separate row keyed by ``research_log_id`` + iteration.
+
+        This split keeps research_logs queries (history list, search
+        by code/topic, VACUUM) fast even when individual artifacts
+        are large. The artifacts can be fetched lazily when the user
+        opens a specific report.
+        """
         try:
             db = get_db()
             with db.get_session() as session:
+                # Ensure both tables exist (research_artifacts may not
+                # exist on databases that pre-date the v5 migration, e.g.
+                # in tests that don't run the full storage bootstrap).
                 session.execute(
                     text("""
                         CREATE TABLE IF NOT EXISTS research_logs (
@@ -519,6 +535,34 @@ JSON格式回复（不要加markdown）：
                 )
                 session.execute(
                     text("""
+                        CREATE TABLE IF NOT EXISTS research_artifacts (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            research_log_id INTEGER NOT NULL,
+                            iteration INTEGER NOT NULL,
+                            tool_name TEXT NOT NULL,
+                            output_json TEXT NOT NULL,
+                            output_size_bytes INTEGER NOT NULL,
+                            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (research_log_id) REFERENCES research_logs(id) ON DELETE CASCADE
+                        )
+                    """)
+                )
+
+                # Build slim step dicts (omit tool_output).
+                slim_steps = [
+                    {
+                        "iteration": s.iteration,
+                        "thinking": s.thinking,
+                        "action": s.action,
+                        "tool_input": s.tool_input,
+                        "observation": s.observation,
+                        "is_final": s.is_final,
+                    }
+                    for s in report.steps
+                ]
+
+                result = session.execute(
+                    text("""
                         INSERT INTO research_logs
                         (code, topic, steps_json, final_report, tool_calls, duration_seconds, timestamp)
                         VALUES (:code, :topic, :steps_json, :final_report, :tool_calls, :duration_seconds, :timestamp)
@@ -526,16 +570,108 @@ JSON格式回复（不要加markdown）：
                     {
                         "code": report.code,
                         "topic": report.topic,
-                        "steps_json": json.dumps([asdict(s) for s in report.steps], ensure_ascii=False),
+                        "steps_json": json.dumps(slim_steps, ensure_ascii=False),
                         "final_report": report.final_report,
                         "tool_calls": report.tool_calls,
                         "duration_seconds": report.duration_seconds,
                         "timestamp": report.timestamp,
                     },
                 )
+                research_log_id = result.lastrowid
+
+                # Persist each step's tool_output as a separate row.
+                artifact_rows = []
+                for s in report.steps:
+                    payload = json.dumps(s.tool_output, ensure_ascii=False, default=str)
+                    artifact_rows.append({
+                        "research_log_id": research_log_id,
+                        "iteration": s.iteration,
+                        "tool_name": s.action,
+                        "output_json": payload,
+                        "output_size_bytes": len(payload.encode("utf-8")),
+                    })
+                if artifact_rows:
+                    session.execute(
+                        text("""
+                            INSERT INTO research_artifacts
+                            (research_log_id, iteration, tool_name, output_json, output_size_bytes)
+                            VALUES (:research_log_id, :iteration, :tool_name, :output_json, :output_size_bytes)
+                        """),
+                        artifact_rows,
+                    )
+
                 session.commit()
+                # Log a tiny summary line so operators can spot bloating.
+                if artifact_rows:
+                    total = sum(r["output_size_bytes"] for r in artifact_rows)
+                    logger.info(
+                        f"[ResearchAgent] Saved report id={research_log_id} "
+                        f"with {len(artifact_rows)} artifacts "
+                        f"(total {total / 1024:.1f} KB)"
+                    )
         except Exception as e:
             logger.warning(f"[ResearchAgent] Failed to save report: {e}")
+
+    def load_report(self, report_id: int) -> Optional[ResearchReport]:
+        """Load a previously-saved report including its full tool artifacts.
+
+        Returns None if the id doesn't exist. Used by the GUI to lazily
+        fetch the heavy tool_output payloads only when the user opens a
+        specific report.
+        """
+        try:
+            db = get_db()
+            with db.get_session() as session:
+                row = session.execute(
+                    text("""
+                        SELECT code, topic, steps_json, final_report,
+                               tool_calls, duration_seconds, timestamp
+                        FROM research_logs WHERE id = :id
+                    """),
+                    {"id": report_id},
+                ).fetchone()
+                if row is None:
+                    return None
+                code, topic, steps_json, final_report, tool_calls, duration, ts = row
+
+                artifact_rows = session.execute(
+                    text("""
+                        SELECT iteration, tool_name, output_json
+                        FROM research_artifacts
+                        WHERE research_log_id = :id
+                        ORDER BY iteration
+                    """),
+                    {"id": report_id},
+                ).fetchall()
+                artifacts_by_iter: Dict[int, Any] = {}
+                for it, _tool, payload in artifact_rows:
+                    try:
+                        artifacts_by_iter[it] = json.loads(payload)
+                    except (TypeError, ValueError):
+                        artifacts_by_iter[it] = payload
+
+                # Rehydrate slim steps with their full tool_output.
+                slim_steps = json.loads(steps_json) if steps_json else []
+                steps: List[ResearchStep] = []
+                for s in slim_steps:
+                    steps.append(ResearchStep(
+                        iteration=s.get("iteration", 0),
+                        thinking=s.get("thinking", ""),
+                        action=s.get("action", ""),
+                        tool_input=s.get("tool_input", {}),
+                        tool_output=artifacts_by_iter.get(s.get("iteration", 0)),
+                        observation=s.get("observation", ""),
+                        is_final=s.get("is_final", False),
+                    ))
+
+                return ResearchReport(
+                    code=code, topic=topic, steps=steps,
+                    final_report=final_report, tool_calls=tool_calls,
+                    duration_seconds=duration, timestamp=ts,
+                )
+        except Exception as e:
+            logger.warning(f"[ResearchAgent] Failed to load report {report_id}: {e}")
+            return None
 
 
 def research_stock(code: str, topic: str, context: Optional[Dict[str, Any]] = None) -> ResearchReport:

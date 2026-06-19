@@ -1,14 +1,17 @@
 """Stock Screener Page - Filter stocks by market cap, PE, industry, price change %."""
 import flet as ft
+from gui.components.async_task import AsyncTaskMixin
 from gui.theme import CARD_BG, CARD_BORDER, ACCENT_COLOR, SUCCESS_COLOR
 from src.i18n import _
 
 
-class ScreenerPage(ft.Container):
+class ScreenerPage(AsyncTaskMixin, ft.Container):
     """Stock screener page with filter form and results table."""
 
     def __init__(self, app, service_client=None):
-        super().__init__()
+        # Init base container + mixin first
+        ft.Container.__init__(self)
+        AsyncTaskMixin.__init__(self, app)
         self.app = app
         self._service_client = service_client
 
@@ -129,70 +132,49 @@ class ScreenerPage(ft.Container):
         )
 
     def _do_screener(self, e):
-        """Execute screener with filter criteria"""
+        """Execute screener with filter criteria — uses AsyncTaskMixin for cancellation."""
         if self._service_client is None:
-            self._status_text.value = _("服务未连接")
-            self._status_text.color = "#ff0000"
+            self.set_status("⚠️ " + _("服务未连接"))
             return
 
-        # Build criteria
         criteria = {}
-        if self._market_cap_min_field.value:
-            try:
-                criteria["market_cap_min"] = float(self._market_cap_min_field.value)
-            except ValueError:
-                pass
-        if self._market_cap_max_field.value:
-            try:
-                criteria["market_cap_max"] = float(self._market_cap_max_field.value)
-            except ValueError:
-                pass
-        if self._pe_min_field.value:
-            try:
-                criteria["pe_min"] = float(self._pe_min_field.value)
-            except ValueError:
-                pass
-        if self._pe_max_field.value:
-            try:
-                criteria["pe_max"] = float(self._pe_max_field.value)
-            except ValueError:
-                pass
-        if self._change_pct_min_field.value:
-            try:
-                criteria["change_pct_min"] = float(self._change_pct_min_field.value)
-            except ValueError:
-                pass
-        if self._change_pct_max_field.value:
-            try:
-                criteria["change_pct_max"] = float(self._change_pct_max_field.value)
-            except ValueError:
-                pass
+        for field_name, key in [
+            ("_market_cap_min_field", "market_cap_min"),
+            ("_market_cap_max_field", "market_cap_max"),
+            ("_pe_min_field", "pe_min"),
+            ("_pe_max_field", "pe_max"),
+            ("_change_pct_min_field", "change_pct_min"),
+            ("_change_pct_max_field", "change_pct_max"),
+        ]:
+            value = getattr(self, field_name).value
+            if value:
+                try:
+                    criteria[key] = float(value)
+                except ValueError:
+                    pass
         if self._industry_field.value:
             criteria["industry"] = self._industry_field.value.strip()
 
-        self._status_text.value = _("正在筛选...")
-        self._status_text.color = "#a0a0a0"
-        self._status_text.update()
-
-        # Execute in background
-        self.app.page.run_task(self._run_screener_async, criteria)
+        self.set_status(_("正在筛选..."))
+        self.run_async(self._run_screener_async, criteria)
 
     async def _run_screener_async(self, criteria):
-        """Run screener asynchronously"""
+        """Run screener asynchronously — honours cancellation via mixin."""
         try:
+            if self.check_cancelled():
+                return
             result = await self._service_client.screen_stocks(criteria)
+            if self.check_cancelled():
+                return
             if result.get("status") == "ok":
                 data = result.get("data", [])
                 count = result.get("count", len(data))
                 self._update_results(data)
-                self._status_text.value = f"共找到 {count} 只符合条件的股票"
-                self._status_text.color = SUCCESS_COLOR
+                self.set_status(f"✅ 共找到 {count} 只符合条件的股票")
             else:
-                self._status_text.value = result.get("message", _("筛选失败"))
-                self._status_text.color = "#ff0000"
+                self.set_status(f"⚠️ {result.get('message', _('筛选失败'))}")
         except Exception as ex:
-            self._status_text.value = f"{_('筛选失败: ')}{str(ex)}"
-            self._status_text.color = "#ff0000"
+            self.set_status(f"⚠️ {_('筛选失败: ')}{str(ex)}")
 
     def _update_results(self, data):
         """Update results table with filtered stocks"""

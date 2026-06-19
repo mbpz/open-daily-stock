@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from typing import List, Optional
 from dataclasses import dataclass
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -27,15 +28,17 @@ class BaseSearchProvider(ABC):
     def __init__(self, api_keys: List[str]):
         self.api_keys = api_keys
         self._current_key_index = 0
+        self._key_lock = threading.Lock()
         self.name = self.__class__.__name__
 
     def get_next_key(self) -> Optional[str]:
-        """轮换取下一个 key"""
+        """轮换取下一个 key（线程安全，可在并发 search_all 中使用）"""
         if not self.api_keys:
             return None
-        key = self.api_keys[self._current_key_index]
-        self._current_key_index = (self._current_key_index + 1) % len(self.api_keys)
-        return key
+        with self._key_lock:
+            key = self.api_keys[self._current_key_index]
+            self._current_key_index = (self._current_key_index + 1) % len(self.api_keys)
+            return key
 
     @abstractmethod
     def search(self, query: str, **kwargs) -> List[SearchResult]:

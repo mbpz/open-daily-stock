@@ -1,14 +1,17 @@
 """财务报表页面"""
 import flet as ft
+from gui.components.async_task import AsyncTaskMixin
 from gui.theme import CARD_BG, CARD_BORDER, SUCCESS_COLOR, ERROR_COLOR, ACCENT_COLOR, TEXT_SECONDARY
 from src.i18n import _
 
 
-class FinancialsPage(ft.Container):
+class FinancialsPage(AsyncTaskMixin, ft.Container):
     """财务报表页面 - 显示利润表/资产负债表/现金流量表"""
 
     def __init__(self, app, service_client=None):
-        super().__init__()
+        # Init base container first, then the mixin (sets up cancellation token).
+        ft.Container.__init__(self)
+        AsyncTaskMixin.__init__(self, app)
         self.app = app
         self._client = service_client
 
@@ -95,35 +98,30 @@ class FinancialsPage(ft.Container):
         )
 
     def _query_financials(self, e):
-        """查询财务报表"""
+        """查询财务报表 — uses AsyncTaskMixin for cancellation + UI helpers."""
         code = self._stock_input.value.strip()
         if not code:
-            self._status_text.value = _("请输入股票代码")
-            self._status_text.color = ERROR_COLOR
-            self._status_text.update()
+            self.set_status(f"⚠️ {_('请输入股票代码')}")
             return
 
         statement_type = self._type_dropdown.value
-        self._status_text.value = _("正在查询...")
-        self._status_text.color = TEXT_SECONDARY
-        self._status_text.update()
-
-        self.app.page.run_task(self._fetch_financials, code, statement_type)
+        self.set_status(_("正在查询..."))
+        self.run_async(self._fetch_financials, code, statement_type)
 
     async def _fetch_financials(self, code: str, statement_type: str):
-        """异步获取财务数据"""
+        """异步获取财务数据 — co-operative cancellation via mixin."""
         import asyncio
 
         try:
+            if self.check_cancelled():
+                return
             if self._client:
-                # Use ServiceClient if available
                 result = await asyncio.to_thread(
                     self._client._send_request,
                     "get_financials",
                     {"code": code, "type": statement_type},
                 )
             else:
-                # Direct handler call for testing
                 from src.data_service import DataService
                 service = DataService()
                 result = await asyncio.to_thread(
@@ -131,14 +129,15 @@ class FinancialsPage(ft.Container):
                     {"action": "get_financials", "code": code, "type": statement_type},
                 )
 
+            if self.check_cancelled():
+                return
+
             if result.get("status") == "ok":
                 self._financial_data = result.get("data", {})
                 self._display_table()
-                self._status_text.value = ""
-                self._status_text.color = TEXT_SECONDARY
+                self.set_status("")
             else:
-                self._status_text.value = result.get("message", _("查询失败"))
-                self._status_text.color = ERROR_COLOR
+                self.set_status(result.get("message", _("查询失败")))
                 self._result_area.content = ft.Text(
                     result.get("message", _("查询失败")),
                     color=ERROR_COLOR,
@@ -146,12 +145,8 @@ class FinancialsPage(ft.Container):
                 self._result_area.visible = True
                 self._result_area.update()
 
-            self._status_text.update()
-
         except Exception as ex:
-            self._status_text.value = f"{_('查询失败: ')}{str(ex)}"
-            self._status_text.color = ERROR_COLOR
-            self._status_text.update()
+            self.set_status(f"{_('查询失败: ')}{str(ex)}")
 
     def _display_table(self):
         """显示财务数据表格"""

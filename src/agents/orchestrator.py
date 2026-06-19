@@ -13,8 +13,11 @@ Architecture:
 
 import json
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
-from typing import Dict, Any, TYPE_CHECKING
+from typing import Dict, Any, Optional, TYPE_CHECKING
+
+from src.analyzer import OrchestratorCancelled
 
 from .technical_agent import TechnicalAgent
 from .fundamental_agent import FundamentalAgent
@@ -46,12 +49,22 @@ class MultiAgentOrchestrator:
         result = orchestrator.analyze("600519", context)
     """
 
-    def __init__(self, analyzer: "GeminiAnalyzer"):
+    def __init__(
+        self,
+        analyzer: "GeminiAnalyzer",
+        cancellation_event: Optional[threading.Event] = None,
+    ):
         """
         Args:
             analyzer: Initialized GeminiAnalyzer instance for LLM calls.
+            cancellation_event: Optional threading.Event. When set(), all
+                in-flight LLM calls and the analysis pipeline will
+                abort cooperatively at the next safe checkpoint. Useful
+                for the GUI to stop a running analysis when the user
+                closes the window.
         """
         self.analyzer = analyzer
+        self.cancellation_event = cancellation_event
         self.agents = [
             TechnicalAgent(),
             FundamentalAgent(),
@@ -92,10 +105,19 @@ class MultiAgentOrchestrator:
                 error_message="AI API Key未配置",
             )
 
+        # Check cancellation at the very top so an already-cancelled
+        # caller (e.g. user closed the window) doesn't even start work.
+        if self.cancellation_event is not None and self.cancellation_event.is_set():
+            logger.info(f"[Orchestrator] Cancelled before start: {name}({code})")
+            return self._cancelled_result(code, name, "cancelled before start")
+
         logger.info(f"[Orchestrator] Starting multi-agent analysis for {name}({code})")
 
-        # Phase 1: Run 3 specialist agents in parallel
-        specialist_results = self._run_specialists(code, context)
+        try:
+            specialist_results = self._run_specialists(code, context)
+        except OrchestratorCancelled as e:
+            logger.info(f"[Orchestrator] Cancelled during specialists: {e}")
+            return self._cancelled_result(code, name, str(e))
 
         # Log results summary
         for agent_name, result in specialist_results.items():
@@ -176,6 +198,18 @@ class MultiAgentOrchestrator:
                     results[agent.name] = {
                         "error": f"Analysis timed out after {SPECIALIST_TIMEOUT}s"
                     }
+                except OrchestratorCancelled as e:
+                    # Cancellation must abort the whole pipeline, not just
+                    # this specialist. Cancel the remaining futures and
+                    # propagate so the analyze() handler can return a
+                    # cancelled AnalysisResult.
+                    logger.info(
+                        f"[Orchestrator] {agent.name} cancelled: {e}; aborting pipeline"
+                    )
+                    for pending in futures:
+                        if not pending.done():
+                            pending.cancel()
+                    raise
                 except Exception as e:
                     logger.warning(
                         f"[Orchestrator] {agent.name} agent failed: {e}"
@@ -183,6 +217,22 @@ class MultiAgentOrchestrator:
                     results[agent.name] = {"error": str(e)}
 
         return results
+
+    def _cancelled_result(self, code: str, name: str, reason: str) -> "AnalysisResult":
+        """Build a partial AnalysisResult for a cancelled analysis."""
+        from src.analyzer import AnalysisResult
+        return AnalysisResult(
+            code=code,
+            name=name,
+            sentiment_score=50,
+            trend_prediction="未知",
+            operation_advice="N/A",
+            confidence_level="低",
+            analysis_summary=f"分析已取消: {reason}",
+            risk_warning="用户取消了本次分析",
+            success=False,
+            error_message=f"cancelled: {reason}",
+        )
 
     def _run_single_agent(
         self, agent, code: str, context: Dict[str, Any]
@@ -200,6 +250,10 @@ class MultiAgentOrchestrator:
         Returns:
             Raw response text from the LLM.
         """
+        # Fast bail-out before doing any prompt construction.
+        if self.cancellation_event is not None and self.cancellation_event.is_set():
+            raise OrchestratorCancelled(f"cancelled before {agent.name}")
+
         prompt = agent.build_prompt(code, context)
 
         generation_config = {
@@ -212,7 +266,7 @@ class MultiAgentOrchestrator:
         )
 
         response_text = self.analyzer._call_api_with_retry(
-            prompt, generation_config
+            prompt, generation_config, cancellation_event=self.cancellation_event
         )
 
         logger.debug(

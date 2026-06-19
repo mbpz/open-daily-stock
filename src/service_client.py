@@ -2,30 +2,122 @@
 import json
 import subprocess
 import sys
+import time
 from typing import Dict, Any, List, Optional
 
-class ServiceClient:
-    """客户端与 DataService 通信"""
 
-    def __init__(self):
-        self._proc = subprocess.Popen(
-            [sys.executable, '-m', 'src.data_service'],
+class ServiceClientError(Exception):
+    """Raised when DataService communication fails irrecoverably."""
+
+
+class ServiceClient:
+    """客户端与 DataService 通信
+
+    设计要点：
+    - 默认 30s read timeout，避免 DataService 崩溃后永久挂起
+    - 单次失败自动重启 DataService 并重试一次
+    - 进程管理在 quit()/__del__/上下文管理器三处统一收口
+    """
+
+    DEFAULT_TIMEOUT = 30.0
+    MAX_RESTART_ATTEMPTS = 1
+    RESTART_BACKOFF_SECONDS = 0.5
+
+    def __init__(self, timeout: Optional[float] = None):
+        self._timeout = timeout if timeout is not None else self.DEFAULT_TIMEOUT
+        self._proc = self._spawn()
+
+    def _spawn(self) -> subprocess.Popen:
+        return subprocess.Popen(
+            [sys.executable, "-m", "src.data_service"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stderr=subprocess.PIPE,
         )
 
+    def _is_alive(self) -> bool:
+        return self._proc is not None and self._proc.poll() is None
+
+    def _ensure_alive(self) -> None:
+        if self._is_alive():
+            return
+        # Stale handle; respawn.
+        self._proc = self._spawn()
+
+    def _read_line_with_timeout(self) -> str:
+        """Block on stdout for one line, but enforce a wall-clock timeout.
+
+        Uses a background reader thread because Popen.stdout is not
+        interruptible in a portable way. The thread is joined on every
+        code path, so it never leaks.
+        """
+        import threading
+        result: Dict[str, Any] = {"line": None, "error": None}
+
+        def _reader() -> None:
+            try:
+                result["line"] = self._proc.stdout.readline()
+            except Exception as e:  # noqa: BLE001
+                result["error"] = e
+
+        reader = threading.Thread(target=_reader, daemon=True)
+        reader.start()
+        reader.join(timeout=self._timeout)
+        if reader.is_alive():
+            # Process is stuck; terminate and surface timeout.
+            try:
+                self._proc.terminate()
+            except Exception:
+                pass
+            raise ServiceClientError(
+                f"DataService did not respond within {self._timeout}s"
+            )
+        if result["error"] is not None:
+            raise ServiceClientError(f"stdout read failed: {result['error']}")
+        if not result["line"]:
+            # EOF: process likely crashed.
+            stderr = ""
+            try:
+                stderr = self._proc.stderr.read().decode("utf-8", errors="replace")[-500:]
+            except Exception:
+                pass
+            raise ServiceClientError(
+                f"DataService closed stdout unexpectedly. stderr: {stderr}"
+            )
+        return result["line"]
+
     def _send_request(self, action: str, data: Optional[Dict] = None) -> Dict:
-        """发送请求到 DataService"""
-        req = {"action": action}
+        """发送请求到 DataService。失败时自动重启并重试一次。"""
+        req: Dict[str, Any] = {"action": action}
         if data:
             req.update(data)
+        payload = (json.dumps(req) + "\n").encode("utf-8")
 
-        self._proc.stdin.write(json.dumps(req).encode())
-        self._proc.stdin.flush()
+        last_error: Optional[Exception] = None
+        for attempt in range(self.MAX_RESTART_ATTEMPTS + 1):
+            try:
+                self._ensure_alive()
+                self._proc.stdin.write(payload)
+                self._proc.stdin.flush()
+                line = self._read_line_with_timeout()
+                return json.loads(line)
+            except (ServiceClientError, BrokenPipeError, ValueError) as e:
+                last_error = e
+                # Best-effort cleanup before respawn.
+                try:
+                    if self._proc is not None and self._proc.poll() is None:
+                        self._proc.terminate()
+                except Exception:
+                    pass
+                if attempt < self.MAX_RESTART_ATTEMPTS:
+                    time.sleep(self.RESTART_BACKOFF_SECONDS)
+                    self._proc = self._spawn()
+                    continue
+                break
 
-        line = self._proc.stdout.readline()
-        return json.loads(line)
+        raise ServiceClientError(
+            f"action={action!r} failed after {self.MAX_RESTART_ATTEMPTS + 1} attempts: {last_error}"
+        )
 
     def hello(self) -> Dict[str, Any]:
         """测试连接，返回版本"""
@@ -74,15 +166,32 @@ class ServiceClient:
         resp = self._send_request("update_config", {"data": config})
         return resp.get("status") == "ok"
 
-    def quit(self):
+    def quit(self) -> None:
         """关闭 DataService"""
         try:
-            self._send_request("quit")
-        except:
-            pass
-        self._proc.terminate()
+            if self._is_alive():
+                try:
+                    self._send_request("quit")
+                except Exception:
+                    # best-effort; we are tearing down anyway
+                    pass
+        finally:
+            if self._proc is not None:
+                try:
+                    self._proc.terminate()
+                except Exception:
+                    pass
+                self._proc = None
 
-    def __del__(self):
+    def __enter__(self) -> "ServiceClient":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.quit()
+
+    def __del__(self) -> None:
         """析构时确保进程关闭"""
-        if hasattr(self, '_proc') and self._proc:
+        try:
             self.quit()
+        except Exception:
+            pass

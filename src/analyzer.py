@@ -12,6 +12,8 @@ A股自选股智能分析系统 - AI分析层
 
 import json
 import logging
+import threading
+from typing import Optional
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -794,7 +796,12 @@ class GeminiAnalyzer:
         
         raise Exception("OpenAI API 调用失败，已达最大重试次数")
     
-    def _call_api_with_retry(self, prompt: str, generation_config: dict) -> str:
+    def _call_api_with_retry(
+        self,
+        prompt: str,
+        generation_config: dict,
+        cancellation_event: Optional["threading.Event"] = None,
+    ) -> str:
         """
         调用 AI API，带有重试和模型切换机制
         
@@ -808,6 +815,7 @@ class GeminiAnalyzer:
         Args:
             prompt: 提示词
             generation_config: 生成配置
+            cancellation_event: 可选信号；如被 set()，立即抛 OrchestratorCancelled
             
         Returns:
             响应文本
@@ -819,18 +827,33 @@ class GeminiAnalyzer:
         config = get_config()
         max_retries = config.gemini_max_retries
         base_delay = config.gemini_retry_delay
-        
+
         last_error = None
         tried_fallback = getattr(self, '_using_fallback', False)
-        
+
+        # Co-operative cancellation: callers can pass an Event that the
+        # caller sets to abort the retry loop (e.g. user closed the GUI).
+        # We check before each attempt and after each sleep.
+        def _check_cancel() -> None:
+            if cancellation_event is not None and cancellation_event.is_set():
+                raise OrchestratorCancelled("cancelled before Gemini attempt")
+
         for attempt in range(max_retries):
+            _check_cancel()
             try:
                 # 请求前增加延时（防止请求过快触发限流）
                 if attempt > 0:
                     delay = base_delay * (2 ** (attempt - 1))  # 指数退避: 5, 10, 20, 40...
                     delay = min(delay, 60)  # 最大60秒
                     logger.info(f"[Gemini] 第 {attempt + 1} 次重试，等待 {delay:.1f} 秒...")
-                    time.sleep(delay)
+                    # Sleep in 0.5s slices so cancellation is responsive
+                    # (default backoff can be 5–60s).
+                    slept = 0.0
+                    while slept < delay:
+                        _check_cancel()
+                        step = min(0.5, delay - slept)
+                        time.sleep(step)
+                        slept += step
                 
                 response = self._model.generate_content(
                     prompt,
@@ -844,6 +867,10 @@ class GeminiAnalyzer:
                     raise ValueError("Gemini 返回空响应")
                     
             except Exception as e:
+                # Cancellation must propagate immediately, not be
+                # treated as a retryable error.
+                if isinstance(e, OrchestratorCancelled):
+                    raise
                 last_error = e
                 error_str = str(e)
                 
@@ -2207,3 +2234,13 @@ if __name__ == "__main__":
         print(f"分析结果: {result.to_dict()}")
     else:
         print("Gemini API 未配置，跳过测试")
+
+
+class OrchestratorCancelled(Exception):
+    """Raised when an in-flight analysis is cancelled by the caller.
+
+    Handled gracefully by MultiAgentOrchestrator: caught once at the top
+    of the analysis pipeline and converted to a partial/cancelled
+    AnalysisResult so the GUI can show a friendly message instead of
+    crashing the worker thread.
+    """

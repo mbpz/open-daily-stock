@@ -28,15 +28,15 @@ class TestSchemaVersion:
         assert count >= 1
         conn.close()
 
-    def test_schema_version_is_v3(self):
-        """Current schema version should be 4 (P7-1: MarketReview table)."""
+    def test_schema_version_is_v5(self):
+        """Current schema version should be 5 (P7-4: research_artifacts split)."""
         from src.storage import get_db
         db = get_db()
         conn = sqlite3.connect(db._engine.url.database)
         c = conn.cursor()
         c.execute("SELECT MAX(version) FROM schema_version")
         version = c.fetchone()[0]
-        assert version == 4
+        assert version == 5
         conn.close()
 
     def test_schema_version_idempotent(self):
@@ -48,7 +48,7 @@ class TestSchemaVersion:
         conn = sqlite3.connect(db1._engine.url.database)
         c = conn.cursor()
         # Count before re-init
-        c.execute("SELECT COUNT(*) FROM schema_version WHERE version = 4")
+        c.execute("SELECT COUNT(*) FROM schema_version WHERE version = 5")
         count_before = c.fetchone()[0]
 
         # The second get_db should return the same singleton (no re-init)
@@ -58,7 +58,7 @@ class TestSchemaVersion:
         # Trigger a real re-init via reset
         DatabaseManager.reset_instance()
         db3 = get_db()
-        c.execute("SELECT COUNT(*) FROM schema_version WHERE version = 4")
+        c.execute("SELECT COUNT(*) FROM schema_version WHERE version = 5")
         count_after = c.fetchone()[0]
         # Strong idempotency: re-init must not create extra version rows
         assert count_after == count_before, (

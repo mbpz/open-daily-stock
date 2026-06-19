@@ -76,6 +76,26 @@ class EventBus:
             cls._instance._initialized = False
         return cls._instance
 
+    @classmethod
+    def reset_instance(cls) -> None:
+        """Drop the singleton and clear all subscriptions.
+
+        Intended for test isolation between pytest tests. Calling this in
+        production code is almost always wrong — it will detach any
+        handlers other modules installed at import time.
+        """
+        if cls._instance is not None:
+            try:
+                cls._instance.unsubscribe_all()
+            except Exception:
+                pass
+            try:
+                # Don't wait forever on stuck executor workers.
+                cls._instance._executor.shutdown(wait=False)
+            except Exception:
+                pass
+            cls._instance = None
+
     def __init__(self):
         if self._initialized:
             return
@@ -168,9 +188,9 @@ class EventBus:
 
         called = 0
         for sub in subs:
+            called += 1  # counted as dispatched even if it raises
             try:
                 sub.handler(event_type, data)
-                called += 1
             except Exception as e:
                 logger.error(
                     f"EventBus handler error for '{event_type}' "

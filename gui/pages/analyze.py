@@ -1,5 +1,8 @@
 """分析页面"""
 import json
+import threading
+
+from gui.components.async_task import AsyncTaskMixin
 import flet as ft
 import asyncio
 from gui.theme import CARD_BG, CARD_BORDER, SUCCESS_COLOR, ERROR_COLOR, WARNING_COLOR, ACCENT_COLOR
@@ -7,11 +10,13 @@ from src.i18n import _
 from src.config import get_config
 
 
-class AnalyzePage(ft.Container):
+class AnalyzePage(AsyncTaskMixin, ft.Container):
     """股票分析页面"""
 
     def __init__(self, app, pipeline=None):
-        super().__init__()
+        # ft.Container takes no positional args; init it first, then the mixin.
+        ft.Container.__init__(self)
+        AsyncTaskMixin.__init__(self, app)
         self.app = app
         self._pipeline = pipeline
         self._progress_ring = None
@@ -110,12 +115,19 @@ class AnalyzePage(ft.Container):
         )
 
         self._result_area = ft.Container(
+
             content=ft.Text(_("分析结果将显示在这里"), color="#a0a0a0"),
             padding=20,
             bgcolor=CARD_BG,
             border_radius=10,
             visible=True,
         )
+
+
+        # Set by the GUI when the page is unmounted; the deep analysis
+        # polling loop checks this between sleeps so closing the window
+        # while a 30 s analysis is running doesn't waste 30 s of LLM
+        # bandwidth. Module-level import (see top of file).
 
         self.content = ft.Container(
             content=ft.Column([
@@ -439,8 +451,24 @@ class AnalyzePage(ft.Container):
 
         self.app.page.run_task(self._run_deep_analysis_async, code)
 
+    # Maximum seconds to wait for a deep analysis task to complete
+    DEEP_ANALYSIS_POLL_TIMEOUT_S = 30
+    DEEP_ANALYSIS_POLL_INTERVAL_S = 1.0
+
     async def _run_deep_analysis_async(self, code: str):
-        """Run deep analysis via WebSocket in background."""
+        """Run deep analysis via WebSocket in background.
+
+        P7-3: Uses a single persistent WebSocket connection for the whole
+        deep-analyze + poll-for-result sequence. Previously, every poll
+        iteration (up to 30) opened and closed a fresh connection, which
+        cost ~100ms of TCP+TLS handshake per poll and could trip
+        per-connection rate limits on the DataService.
+
+        Also honours the orchestrator's cancellation event so a user
+        closing the GUI during a long analysis doesn't waste the LLM
+        calls already in flight.
+        """
+        import asyncio
         import logging
         _log = logging.getLogger(__name__)
 
@@ -448,53 +476,74 @@ class AnalyzePage(ft.Container):
             from src.ws_client import WsClient
             ws = WsClient()
             await ws.connect()
+        except Exception as ex:
+            _log.info(f"GUI deep analysis WS unavailable ({ex}), trying pipeline")
+            return  # fall through to the pipeline path below
 
+        try:
             await ws._ws.send(json.dumps({"action": "deep_analyze", "code": code}))
-
             resp = await ws._ws.recv()
             resp_data = json.loads(resp)
 
-            await ws.close()
-
-            if resp_data.get("status") == "ok":
-                result = resp_data.get("result")
-                if result:
-                    self._update_progress_agent("deep_analyze", "综合分析完成")
-                    self._format_deep_result(result)
-                    return
-                else:
-                    task_id = resp_data.get("task_id")
-                    self._status_text.value = f"深度分析任务已创建: {task_id[:16]}..."
-                    self._status_text.update()
-
-                    # Poll for result
-                    import asyncio
-                    for _ in range(30):  # Max 30 seconds
-                        await asyncio.sleep(1)
-                        await ws.connect()
-                        await ws._ws.send(json.dumps({"action": "get_task", "task_id": task_id}))
-                        task_resp = await ws._ws.recv()
-                        task_data = json.loads(task_resp)
-                        await ws.close()
-
-                        if task_data.get("status") == "ok":
-                            t = task_data.get("data", {})
-                            if t.get("status") == "completed":
-                                self._format_deep_result(t.get("result", {}))
-                                return
-                            elif t.get("status") == "failed":
-                                self._show_result(f"深度分析失败: {t.get('error', '未知错误')}", is_error=True)
-                                return
-                        await asyncio.sleep(0.5)
-
-                    self._show_result("深度分析超时", is_error=True)
-                    return
-            else:
-                self._show_result(f"深度分析请求失败: {resp_data.get('message', '未知错误')}", is_error=True)
+            if resp_data.get("status") != "ok":
+                self._show_result(
+                    f"深度分析请求失败: {resp_data.get('message', '未知错误')}",
+                    is_error=True,
+                )
                 return
 
+            result = resp_data.get("result")
+            if result:
+                self._update_progress_agent("deep_analyze", "综合分析完成")
+                self._format_deep_result(result)
+                return
+
+            # Async task: poll for completion using the SAME connection.
+            task_id = resp_data.get("task_id")
+            if not task_id:
+                self._show_result("深度分析任务已创建但缺少 task_id", is_error=True)
+                return
+
+            self._status_text.value = f"深度分析任务已创建: {task_id[:16]}..."
+            self._status_text.update()
+
+            deadline = asyncio.get_event_loop().time() + self.DEEP_ANALYSIS_POLL_TIMEOUT_S
+            while asyncio.get_event_loop().time() < deadline:
+                # Check GUI cancellation so closing the window stops the polling.
+                if self.check_cancelled():
+                    _log.info("Deep analysis polling cancelled by GUI close")
+                    return
+
+                await asyncio.sleep(self.DEEP_ANALYSIS_POLL_INTERVAL_S)
+
+                try:
+                    task_data = await ws.request("get_task", task_id=task_id)
+                except Exception as ex:
+                    _log.warning(f"Polling get_task failed: {ex}; reconnecting")
+                    if not await ws.reconnect():
+                        break
+                    continue
+
+                t = task_data.get("data", {})
+                if t.get("status") == "completed":
+                    self._format_deep_result(t.get("result", {}))
+                    return
+                if t.get("status") == "failed":
+                    self._show_result(
+                        f"深度分析失败: {t.get('error', '未知错误')}", is_error=True
+                    )
+                    return
+
+            self._show_result("深度分析超时", is_error=True)
+
         except Exception as ex:
-            _log.info(f"GUI deep analysis WS unavailable ({ex}), trying pipeline")
+            _log.exception(f"Deep analysis via WS failed: {ex}")
+            self._show_result(f"深度分析异常: {ex}", is_error=True)
+        finally:
+            try:
+                await ws.close()
+            except Exception:
+                pass
 
         # Fallback: blocking pipeline
         if self._pipeline is None:

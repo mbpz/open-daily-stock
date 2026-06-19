@@ -1,7 +1,9 @@
 """Flet GUI 应用主类"""
-import sys
+import asyncio
+import threading
 import importlib
 import logging
+import sys
 import flet as ft
 
 logger = logging.getLogger(__name__)
@@ -13,9 +15,10 @@ from src.notification_center import get_notification_center, Notification
 from src.update_checker import UpdateChecker
 
 VERSION = "0.2.1"
-from src.service_client import ServiceClient
+from src.service_client import ServiceClient  # noqa: F401  (re-imported lazily in _start_backend)
 from gui.data.task_store import TaskStore
 from src.config import get_config
+from typing import Optional
 
 
 class StockApp:
@@ -39,8 +42,17 @@ class StockApp:
         self.nav_index = 0
         self.status_text = _("last_update")
 
-        # Initialize ServiceClient for DataService communication
-        self._client = ServiceClient()
+        # Backend service client. Created lazily and started in the
+        # background so a slow DataService spawn never blocks the UI.
+        # Until the handshake completes, page modules fall back to a
+        # local-only mode (see self._client_available).
+        self._client: Optional["ServiceClient"] = None
+        self._client_available = False
+        # Two locks because get_client() is called from sync Flet callbacks
+        # that may run on different threads, while _start_backend runs on
+        # the asyncio event loop. Both serialize the spawn path.
+        self._client_lock = asyncio.Lock()       # async path
+        self._client_thread_lock = threading.Lock()  # sync path
 
         # Pipeline reference (lazy-init; used by analyze page as fallback)
         self._pipeline = None
@@ -51,21 +63,121 @@ class StockApp:
         # P5-7: Command palette overlay (lazy-init)
         self._command_palette = None
 
-        # Update checker
+        # Update checker (background check scheduled below)
         self._update_checker = UpdateChecker(current_version=VERSION)
-
-        # Check for updates on startup if enabled
-        self._check_update_on_startup()
 
         # Global keyboard handler for Ctrl+K
         self.page.on_keyboard_event = self._on_keyboard
+
+        # Check for updates on startup if enabled (non-blocking)
+        self.page.run_task(self._check_update_on_startup_async)
 
         # Notification center
         self._nc = get_notification_center()
         self._nc.add_listener(self._on_notification)
 
         self._build_ui()
+        # Always load the markets page immediately; the page itself will
+        # show a placeholder while the backend handshake is in flight.
         self._load_page("markets")
+
+        # Kick off async backend startup AFTER the first frame so the user
+        # sees the UI before we block on subprocess.spawn / IPC handshake.
+        self.page.run_task(self._start_backend)
+
+    BACKEND_START_TIMEOUT = 8.0  # seconds
+
+    async def _start_backend(self) -> None:
+        """Spawn the DataService subprocess and complete the IPC handshake.
+
+        All work runs in a worker thread so the Flet event loop is never
+        blocked. On failure, the UI shows a snackbar with a retry button
+        and the rest of the app continues to function in offline mode
+        (pages that need the backend will report a friendly error).
+        """
+        from src.service_client import ServiceClient, ServiceClientError
+
+        self.update_status("正在启动后端服务...")
+        try:
+            self._client = await asyncio.to_thread(self._spawn_and_handshake)
+        except Exception as e:  # noqa: BLE001
+            logger.exception(f"DataService 启动失败: {e}")
+            self._client = None
+            self._client_available = False
+            self._show_backend_error(str(e))
+            return
+
+        self._client_available = True
+        # Refresh the markets page so it picks up the now-available client.
+        # Guard with getattr so this is robust to test harnesses that
+        # instantiate StockApp without running the full __init__.
+        nav_index = getattr(self, "nav_index", 0)
+        if nav_index == 1:  # markets page index
+            self._load_page("markets")
+        if hasattr(self, "update_status"):
+            self.update_status(_("last_update"))
+
+    def _spawn_and_handshake(self):
+        """Synchronous helper: spawn DataService and complete the hello handshake."""
+        from src.service_client import ServiceClient, ServiceClientError
+
+        client = ServiceClient()
+        # hello() is the first real IPC; if it fails we want to surface that
+        # immediately rather than letting the user hit it on a stock action.
+        client.hello()
+        return client
+
+    def _show_backend_error(self, message: str) -> None:
+        """Display a non-blocking error banner with a retry button."""
+        theme = get_theme()
+        try:
+            self.page.snack_bar = ft.SnackBar(
+                content=ft.Row(
+                    controls=[
+                        ft.Icon(ft.Icons.ERROR_OUTLINE, color=ft.Colors.WHITE),
+                        ft.Text(
+                            f"后端服务启动失败: {message[:80]}",
+                            color=ft.Colors.WHITE,
+                            expand=True,
+                        ),
+                        ft.TextButton(
+                            "重试",
+                            on_click=lambda _e: self.page.run_task(self._start_backend),
+                        ),
+                    ],
+                    tight=True,
+                ),
+                bgcolor=theme["ERROR_COLOR"],
+                open=True,
+                duration=10,
+            )
+            self.page.update()
+        except Exception:
+            logger.warning("显示后端错误 snackbar 失败")
+
+    def get_client(self):
+        """Return the ServiceClient, spawning it on demand if necessary.
+
+        Thread-safe: Flet invokes this from many callback threads. Uses
+        a threading.Lock with double-checked locking so concurrent
+        callers see a single shared client instance.
+        """
+        if self._client is not None and self._client_available:
+            return self._client
+        with self._client_thread_lock:
+            # Re-check under the lock to avoid duplicate spawns.
+            if self._client is not None and self._client_available:
+                return self._client
+            from src.service_client import ServiceClient, ServiceClientError
+            try:
+                client = ServiceClient()
+                client.hello()
+                self._client = client
+                self._client_available = True
+            except ServiceClientError as e:
+                logger.warning(f"按需启动后端失败: {e}")
+                return None
+        return self._client
 
     def _build_ui(self):
         """Build the main UI layout"""
@@ -408,13 +520,20 @@ class StockApp:
         except Exception as ex:
             self.update_status(f"{_('update_failed')}: {ex}")
 
-    def _check_update_on_startup(self):
-        """Check for updates if auto_check is enabled"""
-        config = get_config()
-        if config.auto_check_update:
-            if self._update_checker.is_new_version_available():
-                version, notes = self._update_checker.get_release_info()
-                self._show_update_dialog(version, notes)
+    async def _check_update_on_startup_async(self) -> None:
+        """Check for updates if auto_check is enabled (runs in Flet loop)."""
+        try:
+            config = get_config()
+            if not config.auto_check_update:
+                return
+            # Network-bound; offload to a worker thread.
+            available = await asyncio.to_thread(self._update_checker.is_new_version_available)
+            if not available:
+                return
+            version, notes = await asyncio.to_thread(self._update_checker.get_release_info)
+            self._show_update_dialog(version, notes)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"启动时检查更新失败 (非致命): {e}")
 
     def _show_update_dialog(self, version, notes):
         """Show update dialog"""
