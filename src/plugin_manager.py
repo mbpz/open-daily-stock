@@ -126,6 +126,11 @@ class PluginManager:
         self._plugins[domain][name] = instance
 
         if info is None:
+            # priority 可能是 int 或带 .value 的 Enum（notify channels 用
+            # ChannelPriority Enum）— 统一规范成 int 让 list_plugins() 的 sorted
+            # 比较正常工作
+            raw_priority = getattr(instance, "priority", 50)
+            priority_int = raw_priority.value if hasattr(raw_priority, "value") else raw_priority
             info = PluginInfo(
                 name=name,
                 domain=domain,
@@ -133,7 +138,7 @@ class PluginManager:
                 version=getattr(instance, "version", ""),
                 description=getattr(instance, "description", ""),
                 available=self._check_available(instance),
-                priority=getattr(instance, "priority", 50),
+                priority=priority_int,
             )
         self._infos[domain][name] = info
 
@@ -236,9 +241,13 @@ class PluginManager:
         """Register notification channel plugins."""
         try:
             from src.notify.channels import ALL_CHANNELS
+            # Channels are constructed with empty config — plugin_manager only
+            # registers types so callers can enumerate them in the plugin list.
+            # Real notification flows instantiate channels with the live config
+            # via NotificationDispatcher / NotificationService.
             for name, cls in ALL_CHANNELS.items():
                 try:
-                    instance = cls()
+                    instance = cls({})
                     self.register(instance, "notify", name=name)
                 except Exception as e:
                     logger.debug(f"Notifier {name} unavailable: {e}")
