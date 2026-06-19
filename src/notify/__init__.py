@@ -6,7 +6,7 @@
 - 报告生成用 reports 模块（5 个 generate_* 函数）
 - 渠道注册用 channels/__init__.py 的 ALL_CHANNELS
 
-旧 src.notification 文件将在迁移完成后删除。
+P0-2 重构完成：旧 src.notification.py（3112 行）已删除，全部代码迁入 src/notify/。
 """
 from .base import BaseChannel, ChannelPriority, ChannelResult
 from .builder import NotificationBuilder
