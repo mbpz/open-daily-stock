@@ -57,7 +57,7 @@ def mock_config_none():
 class TestNotificationServiceFacade:
     def test_import_from_notification_still_works(self):
         """向后兼容：从 src.notification import 仍可用。"""
-        from src.notification import NotificationService, BotMessage, NotificationChannel
+        from src.notify import NotificationService, BotMessage, NotificationChannel
         assert NotificationService is not None
         assert BotMessage is not None
         assert NotificationChannel is not None
