@@ -1,31 +1,55 @@
-"""通知模块 - 重构后版本
+"""通知模块 — P0-2 重构完版。
 
-新代码请使用：
-    from src.notify import (
-        NotificationDispatcher,      # 多渠道统一派发
-        BaseChannel, ChannelResult, # 渠道基类
-        MarkdownFormatter,          # 报告格式化
-        NotificationChannel,        # 渠道类型 enum
-        BotMessage,                 # Bot 消息结构
-    )
+全部入口由 src/notify/ 提供：
+- 生产代码用 NotificationService facade（统一分发 + 状态查询）
+- 类型导入用 types 模块（BotMessage / NotificationChannel / ChannelDetector）
+- 报告生成用 reports 模块（5 个 generate_* 函数）
+- 渠道注册用 channels/__init__.py 的 ALL_CHANNELS
 
-旧 API（src.notification.NotificationService）仍可用但已 deprecated，
-会被自动转发到新实现并发出 DeprecationWarning。详见
-docs/adr/ADR-006-notification-migration.md。
+旧 src.notification 文件将在迁移完成后删除。
 """
-from .base import BaseChannel, ChannelResult, ChannelPriority
+from .base import BaseChannel, ChannelPriority, ChannelResult
+from .builder import NotificationBuilder
+from .channels import ALL_CHANNELS
 from .dispatcher import NotificationDispatcher
 from .formatters import MarkdownFormatter, SimpleFormatter, DashboardFormatter
-from ._legacy import NotificationChannel, BotMessage
+from .reports import (
+    generate_daily_report,
+    generate_dashboard_report,
+    generate_single_stock_report,
+    generate_wechat_dashboard,
+    generate_wechat_summary,
+)
+from .service import NotificationService
+from .singletons import get_notification_service, send_daily_report
+from .types import BotMessage, ChannelDetector, NotificationChannel
 
 __all__ = [
-    "BaseChannel",
-    "ChannelResult",
-    "ChannelPriority",
+    # facade
+    "NotificationService",
     "NotificationDispatcher",
+    # singletons
+    "get_notification_service",
+    "send_daily_report",
+    # types
+    "BotMessage",
+    "NotificationChannel",
+    "ChannelDetector",
+    # channels
+    "ALL_CHANNELS",
+    "BaseChannel",
+    "ChannelPriority",
+    "ChannelResult",
+    # formatters
     "MarkdownFormatter",
     "SimpleFormatter",
     "DashboardFormatter",
-    "NotificationChannel",
-    "BotMessage",
+    # reports
+    "generate_daily_report",
+    "generate_dashboard_report",
+    "generate_wechat_dashboard",
+    "generate_wechat_summary",
+    "generate_single_stock_report",
+    # builder
+    "NotificationBuilder",
 ]
