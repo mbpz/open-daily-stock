@@ -14,7 +14,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from src.notification import NotificationService
+from src.notify import NotificationService
 from src.market_analyzer import MarketAnalyzer
 from src.search_service import SearchService
 from src.analyzer import GeminiAnalyzer

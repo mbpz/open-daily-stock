@@ -543,7 +543,7 @@ class DataService:
     def _send_analysis_notification(self, code: str, result):
         """发送分析完成通知"""
         try:
-            from src.notification import NotificationService
+            from src.notify import NotificationService
             notifier = NotificationService()
             message = f"📊 {result.name}({code}) 分析完成: {result.operation_advice} (评分: {result.sentiment_score})"
             notifier.send(message)
@@ -673,7 +673,7 @@ class DataService:
     def _send_deep_analysis_notification(self, code: str, result):
         """Send notification for completed deep analysis."""
         try:
-            from src.notification import NotificationService
+            from src.notify import NotificationService
             notifier = NotificationService()
             name = getattr(result, 'name', code)
             score = getattr(result, 'composite_score', 50)
@@ -1851,7 +1851,7 @@ class DataService:
 
             # Send notification
             try:
-                from src.notification import NotificationService
+                from src.notify import NotificationService
                 ns = NotificationService()
                 ns.send(f"🎯 大盘复盘 {today}\n\n{summary}...")
             except Exception:
@@ -2633,10 +2633,11 @@ class DataService:
     def _send_alert(self, market):
         """发送异动通知"""
         try:
-            from src.notification import NotificationService
+            from src.notify import NotificationService
             notifier = NotificationService()
             message = f"\U0001f6a8 {market['code']} 异动: {market['change_pct']:+.2f}% (价格: {market['price']})"
-            if notifier.send(message):
+            results = notifier.send(message)
+            if any(r.success for r in results):
                 logger.info(f"异动提醒发送成功: {market['code']}")
             else:
                 logger.warning(f"异动提醒发送失败: {market['code']}")

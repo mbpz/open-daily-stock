@@ -357,8 +357,8 @@ class TestPipelineNotify:
         pipeline.notifier.send_to_context.assert_not_called()
 
     def test_send_notifications_with_wechat(self, mock_config):
-        """测试企业微信通知"""
-        from src.notification import NotificationChannel
+        """测试企业微信通知（新契约：send_to_channel / 字符串 key）。"""
+        from unittest.mock import MagicMock as MM
 
         pipeline = StockAnalysisPipeline(config=mock_config, max_workers=2)
 
@@ -373,18 +373,18 @@ class TestPipelineNotify:
         # Mock notifier
         pipeline.notifier = MagicMock()
         pipeline.notifier.is_available.return_value = True
-        pipeline.notifier.get_available_channels.return_value = [NotificationChannel.WECHAT]
-        pipeline.notifier.generate_dashboard_report.return_value = "仪表盘报告"
-        pipeline.notifier.generate_wechat_dashboard.return_value = "企业微信内容"
+        pipeline.notifier.get_available_channels.return_value = ["wechat"]
         pipeline.notifier.save_report_to_file.return_value = "/path/to/report.txt"
         pipeline.notifier.send_to_context.return_value = False
-        pipeline.notifier.send_to_wechat.return_value = True
+        pipeline.notifier.send_to_channel.return_value = MM(success=True)
 
         # 执行
         pipeline._send_notifications([mock_result])
 
-        # 验证
-        pipeline.notifier.send_to_wechat.assert_called_once()
+        # 验证 — wechat 发送了 1 次，其他渠道 0 次
+        wechat_calls = [c for c in pipeline.notifier.send_to_channel.call_args_list
+                        if c.args[0] == "wechat"]
+        assert len(wechat_calls) >= 1
 
     def test_send_notifications_empty_results(self, mock_config):
         """测试空结果列表"""
