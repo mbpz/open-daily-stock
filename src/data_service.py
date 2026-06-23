@@ -235,6 +235,13 @@ class DataService:
         # Load external data provider plugins
         self._load_plugins()
 
+        # Handler 域拆分（P0-4 迁移）：各 src/handlers/<domain>.py 模块的
+        # register() 会把 module-level 函数挂为 service 实例属性，并覆盖
+        # service._actions dict 同名条目。dispatch 路径（_handle_request）
+        # 保持不变——getattr(self, _actions[action]) 先命中实例属性。
+        from src.handlers import register_all
+        register_all(self)
+
     def _is_demo_mode(self) -> bool:
         """Check if the service is running in demo mode (reads config live)."""
         return get_config().is_demo_mode()
