@@ -21,7 +21,7 @@ import pandas as pd
 import yfinance as yf
 
 from src.config import get_config
-from src.search_service import SearchService
+from src.search_pkg import SearchManager as SearchService
 
 logger = logging.getLogger(__name__)
 

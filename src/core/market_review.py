@@ -16,7 +16,7 @@ from typing import Optional
 
 from src.notify import NotificationService
 from src.market_analyzer import MarketAnalyzer
-from src.search_service import SearchService
+from src.search_pkg import SearchManager as SearchService
 from src.analyzer import GeminiAnalyzer
 
 
