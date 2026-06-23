@@ -1,10 +1,11 @@
 """搜索管理器 - 多 key 负载均衡 + 多源并发"""
 import logging
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional
 
-from .base import SearchResult, BaseSearchProvider
+from .base import SearchResponse, SearchResult, BaseSearchProvider
 from .bocha import BochaProvider
 from .tavily import TavilyProvider
 from .serpapi import SerpapiProvider
@@ -50,8 +51,9 @@ class SearchManager:
 
         logger.info(f"搜索管理器初始化完成，共 {len(self.providers)} 个提供者")
 
+    @property
     def is_available(self) -> bool:
-        """至少有一个提供者可用"""
+        """至少有一个提供者可用（作为 property 兼容旧 SearchService.is_available 契约）"""
         return len(self.providers) > 0
 
     def search(self, query: str, **kwargs) -> List[SearchResult]:
@@ -149,37 +151,156 @@ class SearchManager:
 
     def search_stock_news(
         self,
-        stock_name: str,
         stock_code: str,
-        days: int = 7,
-    ) -> List[Dict[str, Any]]:
-        """
-        搜索股票新闻
+        stock_name: str,
+        max_results: int = 10,
+        focus_keywords: Optional[List[str]] = None,
+        days: Optional[int] = None,  # noqa: ARG002 — kept for backwards compat
+    ) -> SearchResponse:
+        """搜索股票新闻。
 
-        专门为 AI 分析设计的新闻搜索接口。
+        迁自 src/search_service.py:SearchService.search_stock_news。返回 SearchResponse
+        以兼容 data_service.py / market_analyzer.py 的调用契约。
 
         Args:
-            stock_name: 股票名称（用于搜索）
-            stock_code: 股票代码
-            days: 搜索最近天数
+            stock_code: 股票代码（"market" 表示大盘搜索）
+            stock_name: 股票名称
+            max_results: 最大结果数（每个 provider 上限）
+            focus_keywords: 额外查询词（可选，拼接到查询）
+            days: 搜索最近天数（保留参数兼容，目前不参与查询）
 
         Returns:
-            List[Dict]: 格式化后的新闻列表，适合作为 AI 分析输入
+            SearchResponse(query=..., results=[SearchResult], provider="multi")
         """
-        # 构建搜索查询
-        query = f"{stock_name} {stock_code} 股票"
+        # 构建查询
+        if stock_code == "market":
+            query = stock_name
+        else:
+            query = f"{stock_name} {stock_code} 股票"
+        if focus_keywords:
+            query = f"{query} {' '.join(focus_keywords)}"
 
-        # 使用多源并发合并搜索
-        results = self.search_all(query, count=10)
+        # 多源并发合并
+        results = self.search_all(query, count=max_results)
 
-        # 格式化为 AI 分析友好的格式
-        news_items = []
-        for r in results:
-            news_items.append({
-                "title": r.title,
-                "url": r.url,
-                "snippet": r.snippet,
-                "source": r.source,
-            })
+        return SearchResponse(
+            query=query,
+            results=results,
+            provider="multi",
+            success=bool(results),
+            error_message=None if results else "未找到结果",
+        )
 
-        return news_items
+    # ------------------------------------------------------------------
+    # 多维度情报搜索 — 迁自 src/search_service.py:SearchService
+    # ------------------------------------------------------------------
+
+    # 搜索维度配置（迁自 search_service.py:search_comprehensive_intel）
+    _INTEL_DIMENSIONS = [
+        {
+            "name": "latest_news",
+            "query_tmpl": "{name} {code} 最新 新闻 重大 事件",
+            "desc": "📰 最新消息",
+        },
+        {
+            "name": "market_analysis",
+            "query_tmpl": "{name} 研报 目标价 评级 深度分析",
+            "desc": "📈 机构分析",
+        },
+        {
+            "name": "risk_check",
+            "query_tmpl": "{name} 减持 处罚 违规 诉讼 利空 风险",
+            "desc": "⚠️ 风险排查",
+        },
+        {
+            "name": "earnings",
+            "query_tmpl": "{name} 业绩预告 财报 营收 净利润 同比增长",
+            "desc": "📊 业绩预期",
+        },
+        {
+            "name": "industry",
+            "query_tmpl": "{name} 所在行业 竞争对手 市场份额 行业前景",
+            "desc": "🏭 行业分析",
+        },
+    ]
+
+    def search_comprehensive_intel(
+        self,
+        stock_code: str,
+        stock_name: str,
+        max_searches: int = 3,
+    ) -> Dict[str, SearchResponse]:
+        """多维度情报搜索。
+
+        迁自 src/search_service.py:SearchService.search_comprehensive_intel。
+        每个维度轮流挑一个 provider 调用，避免单 provider 配额耗尽。
+        """
+        results: Dict[str, SearchResponse] = {}
+        available = [p for p in self.providers if p.is_available()]
+        if not available:
+            return results
+
+        provider_index = 0
+        search_count = 0
+
+        for dim in self._INTEL_DIMENSIONS:
+            if search_count >= max_searches:
+                break
+
+            provider = available[provider_index % len(available)]
+            provider_index += 1
+            query = dim["query_tmpl"].format(name=stock_name, code=stock_code)
+
+            logger.info(f"[情报搜索] {dim['desc']}: 使用 {provider.name}")
+            try:
+                hits = provider.search(query, count=3)
+                resp = SearchResponse(
+                    query=query,
+                    results=hits,
+                    provider=provider.name,
+                    success=bool(hits),
+                    error_message=None if hits else "未找到结果",
+                )
+            except Exception as e:
+                logger.warning(f"[情报搜索] {dim['desc']}: {provider.name} 异常: {e}")
+                resp = SearchResponse(
+                    query=query,
+                    results=[],
+                    provider=provider.name,
+                    success=False,
+                    error_message=str(e),
+                )
+
+            results[dim["name"]] = resp
+            search_count += 1
+            time.sleep(0.5)  # 防止请求过快
+
+        return results
+
+    def format_intel_report(
+        self,
+        intel_results: Dict[str, SearchResponse],
+        stock_name: str,
+    ) -> str:
+        """格式化情报搜索结果为报告文本。
+
+        迁自 src/search_service.py:SearchService.format_intel_report。
+        """
+        lines = [f"【{stock_name} 情报搜索结果】"]
+        dim_desc_map = {d["name"]: d["desc"] for d in self._INTEL_DIMENSIONS}
+
+        for dim_name in dim_desc_map:
+            if dim_name not in intel_results:
+                continue
+            resp = intel_results[dim_name]
+            lines.append(f"\n{dim_desc_map[dim_name]} (来源: {resp.provider}):")
+            if resp.success and resp.results:
+                for i, r in enumerate(resp.results[:4], 1):
+                    date_str = f" [{r.published_date}]" if r.published_date else ""
+                    lines.append(f"  {i}. {r.title}{date_str}")
+                    snippet = r.snippet[:150] if len(r.snippet) > 20 else r.snippet
+                    lines.append(f"     {snippet}...")
+            else:
+                lines.append("  未找到相关信息")
+
+        return "\n".join(lines)

@@ -15,7 +15,33 @@ class SearchResult:
     url: str
     snippet: str
     source: str  # e.g., "bocha", "tavily", "serpapi"
-    published_at: Optional[str] = None
+    published_date: Optional[str] = None
+
+    def to_text(self) -> str:
+        """转换为文本格式（迁移兼容：旧 SearchResult 的 to_text 方法）。"""
+        date_str = f" ({self.published_date})" if self.published_date else ""
+        return f"【{self.source}】{self.title}{date_str}\n{self.snippet}"
+
+
+@dataclass
+class SearchResponse:
+    """搜索响应（兼容旧 SearchResponse 契约：.results / .success / .provider）。"""
+    query: str
+    results: List[SearchResult]
+    provider: str
+    success: bool = True
+    error_message: Optional[str] = None
+
+    def to_context(self, max_results: int = 5) -> str:
+        """将搜索结果转换为可用于 AI 分析的上下文。"""
+        if not self.success or not self.results:
+            return f"搜索 '{self.query}' 未找到相关结果。"
+
+        lines = [f"【{self.query} 搜索结果】（来源：{self.provider}）"]
+        for i, result in enumerate(self.results[:max_results], 1):
+            lines.append(f"\n{i}. {result.to_text()}")
+
+        return "\n".join(lines)
 
 
 class BaseSearchProvider(ABC):

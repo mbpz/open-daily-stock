@@ -334,11 +334,11 @@ JSON格式回复（不要加markdown）：
     def _tool_search_news(self, query: str) -> Dict[str, Any]:
         """Search news using search_service."""
         try:
-            from src.search_service import get_search_service
+            from src.search_pkg import get_search_service
             svc = get_search_service()
             if svc:
-                result = svc.search(query, max_results=5)
-                if result.success:
+                results = svc.search(query, count=5)
+                if results:
                     return {
                         "success": True,
                         "results": [
@@ -348,7 +348,7 @@ JSON格式回复（不要加markdown）：
                                 "source": r.source,
                                 "date": r.published_date,
                             }
-                            for r in result.results
+                            for r in results
                         ],
                     }
             return {"success": False, "error": "Search service not available"}

@@ -1015,7 +1015,7 @@ class DataService:
             return {"status": "ok", "data": [], "message": "演示模式下不提供实时新闻搜索"}
 
         try:
-            from src.search_service import SearchService
+            from src.search_pkg import SearchManager as SearchService
             from src.config import get_config
 
             config = get_config()

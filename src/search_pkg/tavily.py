@@ -52,7 +52,7 @@ class TavilyProvider(BaseSearchProvider):
                     url=item.get("url", ""),
                     snippet=item.get("content", ""),
                     source="tavily",
-                    published_at=item.get("published_date"),
+                    published_date=item.get("published_date"),
                 ))
 
             return results

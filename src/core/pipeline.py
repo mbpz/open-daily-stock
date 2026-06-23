@@ -32,7 +32,7 @@ from src.notify.reports import (
     generate_wechat_dashboard,
 )
 from src.notify.types import BotMessage, NotificationChannel
-from src.search_service import SearchService
+from src.search_pkg import SearchManager as SearchService
 from src.enums import ReportType
 from src.stock_analyzer import StockTrendAnalyzer, TrendAnalysisResult
 
