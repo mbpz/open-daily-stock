@@ -51,8 +51,9 @@ class SearchManager:
 
         logger.info(f"搜索管理器初始化完成，共 {len(self.providers)} 个提供者")
 
+    @property
     def is_available(self) -> bool:
-        """至少有一个提供者可用"""
+        """至少有一个提供者可用（作为 property 兼容旧 SearchService.is_available 契约）"""
         return len(self.providers) > 0
 
     def search(self, query: str, **kwargs) -> List[SearchResult]:
