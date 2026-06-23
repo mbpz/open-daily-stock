@@ -53,7 +53,7 @@ class BochaProvider(BaseSearchProvider):
                     url=item.get("url", ""),
                     snippet=item.get("content", ""),
                     source="bocha",
-                    published_at=item.get("publish_time"),
+                    published_date=item.get("publish_time"),
                 ))
 
             return results

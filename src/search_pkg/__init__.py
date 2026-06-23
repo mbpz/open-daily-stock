@@ -1,24 +1,24 @@
 """
 搜索模块 - 重构后版本
 
-支持多源搜索：
-- Bocha API
-- Tavily API
-- SerpAPI
-
-提供 key 轮换和结果合并。
+新代码使用：
+    from src.search_pkg import SearchManager, get_search_service
 """
-from .base import BaseSearchProvider, SearchResult
+from .base import BaseSearchProvider, SearchResponse, SearchResult
 from .bocha import BochaProvider
-from .tavily import TavilyProvider
-from .serpapi import SerpapiProvider
 from .manager import SearchManager
+from .serpapi import SerpapiProvider
+from .singletons import get_search_service, reset_search_service
+from .tavily import TavilyProvider
 
 __all__ = [
     "SearchResult",
+    "SearchResponse",
     "BaseSearchProvider",
     "BochaProvider",
     "TavilyProvider",
     "SerpapiProvider",
     "SearchManager",
+    "get_search_service",
+    "reset_search_service",
 ]
