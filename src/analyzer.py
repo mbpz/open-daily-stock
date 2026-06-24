@@ -39,6 +39,7 @@ from src.llm.prompts import (  # noqa: F401  re-export for backward compat
     format_volume, format_amount, build_analysis_prompt,
 )
 from src.llm.client import (  # noqa: F401  re-export for backward compat
+    LLMClient,
     init_gemini_model, init_openai_client, switch_to_fallback_model,
     is_available as llm_is_available,
 )
@@ -247,168 +248,95 @@ class GeminiAnalyzer:
     def __init__(self, api_key: Optional[str] = None):
         """
         初始化 AI 分析器
-        
+
         优先级：Gemini > OpenAI 兼容 API
-        
+
         Args:
             api_key: Gemini API Key（可选，默认从配置读取）
         """
         config = get_config()
-        self._api_key = api_key or config.gemini_api_key
-        self._model = None
-        self._current_model_name = None  # 当前使用的模型名称
-        self._using_fallback = False  # 是否正在使用备选模型
-        self._use_openai = False  # 是否使用 OpenAI 兼容 API
-        self._openai_client = None  # OpenAI 客户端
-        self._system_prompt = self.SYSTEM_PROMPT  # Current system prompt (may be CN override)
+        api_key = api_key or config.gemini_api_key
+
+        self._system_prompt = self.SYSTEM_PROMPT  # mutable: CN 模式会覆盖
         self._cn_mode = False  # Whether to use A-share specific CN prompts
-        
-        # 检查 Gemini API Key 是否有效（过滤占位符）
-        gemini_key_valid = self._api_key and not self._api_key.startswith('your_') and len(self._api_key) > 10
-        
-        # 优先尝试初始化 Gemini
-        if gemini_key_valid:
-            try:
-                self._init_model()
-            except Exception as e:
-                logger.warning(f"Gemini 初始化失败: {e}，尝试 OpenAI 兼容 API")
-                self._init_openai_fallback()
-        else:
-            # Gemini Key 未配置，尝试 OpenAI
-            logger.info("Gemini API Key 未配置，尝试使用 OpenAI 兼容 API")
-            self._init_openai_fallback()
-        
-        # 两者都未配置
-        if not self._model and not self._openai_client:
-            logger.warning("未配置任何 AI API Key，AI 分析功能将不可用")
-    
-    def _init_openai_fallback(self) -> None:
-        """
-        初始化 OpenAI 兼容 API 作为备选
-        
-        支持所有 OpenAI 格式的 API，包括：
-        - OpenAI 官方
-        - DeepSeek
-        - 通义千问
-        - Moonshot 等
-        """
-        config = get_config()
-        
-        # 检查 OpenAI API Key 是否有效（过滤占位符）
-        openai_key_valid = (
-            config.openai_api_key and 
-            not config.openai_api_key.startswith('your_') and 
-            len(config.openai_api_key) > 10
+
+        # All provider state is owned by LLMClient
+        self._client = LLMClient(
+            api_key=api_key,
+            gemini_model=config.gemini_model,
+            gemini_fallback_model=config.gemini_model_fallback,
+            openai_api_key=config.openai_api_key,
+            openai_base_url=config.openai_base_url,
+            openai_model=config.openai_model,
+            system_prompt=self._system_prompt,
         )
-        
-        if not openai_key_valid:
-            logger.debug("OpenAI 兼容 API 未配置或配置无效")
-            return
-        
-        # 分离 import 和客户端创建，以便提供更准确的错误信息
-        try:
-            from openai import OpenAI
-        except ImportError:
-            logger.error("未安装 openai 库，请运行: pip install openai")
-            return
-        
-        try:
-            # base_url 可选，不填则使用 OpenAI 官方默认地址
-            client_kwargs = {"api_key": config.openai_api_key}
-            if config.openai_base_url and config.openai_base_url.startswith('http'):
-                client_kwargs["base_url"] = config.openai_base_url
-            
-            self._openai_client = OpenAI(**client_kwargs)
-            self._current_model_name = config.openai_model
-            self._use_openai = True
-            logger.info(f"OpenAI 兼容 API 初始化成功 (base_url: {config.openai_base_url}, model: {config.openai_model})")
-        except ImportError as e:
-            # 依赖缺失（如 socksio）
-            if 'socksio' in str(e).lower() or 'socks' in str(e).lower():
-                logger.error(f"OpenAI 客户端需要 SOCKS 代理支持，请运行: pip install httpx[socks] 或 pip install socksio")
-            else:
-                logger.error(f"OpenAI 依赖缺失: {e}")
-        except Exception as e:
-            error_msg = str(e).lower()
-            if 'socks' in error_msg or 'socksio' in error_msg or 'proxy' in error_msg:
-                logger.error(f"OpenAI 代理配置错误: {e}，如使用 SOCKS 代理请运行: pip install httpx[socks]")
-            else:
-                logger.error(f"OpenAI 兼容 API 初始化失败: {e}")
-    
+
+    # ============================================================
+    # State delegation to LLMClient — backward-compat properties
+    # Old code reads/writes self._model / self._openai_client etc.;
+    # these properties keep that working while LLMClient owns the state.
+    # ============================================================
+
+    @property
+    def _api_key(self) -> Optional[str]:
+        return self._client.api_key
+
+    @property
+    def _model(self):
+        return self._client.model
+
+    @_model.setter
+    def _model(self, value) -> None:
+        self._client.model = value
+
+    @property
+    def _openai_client(self):
+        return self._client.openai_client
+
+    @_openai_client.setter
+    def _openai_client(self, value) -> None:
+        self._client.openai_client = value
+
+    @property
+    def _current_model_name(self) -> Optional[str]:
+        return self._client.current_model_name
+
+    @_current_model_name.setter
+    def _current_model_name(self, value) -> None:
+        self._client.current_model_name = value
+
+    @property
+    def _using_fallback(self) -> bool:
+        return self._client.using_fallback
+
+    @_using_fallback.setter
+    def _using_fallback(self, value: bool) -> None:
+        self._client.using_fallback = value
+
+    @property
+    def _use_openai(self) -> bool:
+        return self._client.use_openai
+
+    @_use_openai.setter
+    def _use_openai(self, value: bool) -> None:
+        self._client.use_openai = value
+
+    def _init_openai_fallback(self) -> None:
+        """初始化 OpenAI 兼容 API（委托 LLMClient.init_openai）"""
+        self._client.init_openai()
+
     def _init_model(self) -> None:
-        """
-        初始化 Gemini 模型
-        
-        配置：
-        - 使用 gemini-3-flash-preview 或 gemini-2.5-flash 模型
-        - 不启用 Google Search（使用外部 Tavily/SerpAPI 搜索）
-        """
-        try:
-            import google.generativeai as genai
-            
-            # 配置 API Key
-            genai.configure(api_key=self._api_key)
-            
-            # 从配置获取模型名称
-            config = get_config()
-            model_name = config.gemini_model
-            fallback_model = config.gemini_model_fallback
-            
-            # 不再使用 Google Search Grounding（已知有兼容性问题）
-            # 改为使用外部搜索服务（Tavily/SerpAPI）预先获取新闻
-            
-            # 尝试初始化主模型
-            try:
-                self._model = genai.GenerativeModel(
-                    model_name=model_name,
-                    system_instruction=self._system_prompt,
-                )
-                self._current_model_name = model_name
-                self._using_fallback = False
-                logger.info(f"Gemini 模型初始化成功 (模型: {model_name})")
-            except Exception as model_error:
-                # 尝试备选模型
-                logger.warning(f"主模型 {model_name} 初始化失败: {model_error}，尝试备选模型 {fallback_model}")
-                self._model = genai.GenerativeModel(
-                    model_name=fallback_model,
-                    system_instruction=self._system_prompt,
-                )
-                self._current_model_name = fallback_model
-                self._using_fallback = True
-                logger.info(f"Gemini 备选模型初始化成功 (模型: {fallback_model})")
-            
-        except Exception as e:
-            logger.error(f"Gemini 模型初始化失败: {e}")
-            self._model = None
-    
+        """初始化 Gemini 模型（委托 LLMClient.__init__ 已完成；保留为 no-op 兼容旧调用）"""
+        # LLMClient.__init__ 已做完 Gemini 初始化；这里保留以防外部代码调用
+        pass
+
     def _switch_to_fallback_model(self) -> bool:
-        """
-        切换到备选模型
-        
-        Returns:
-            是否成功切换
-        """
-        try:
-            import google.generativeai as genai
-            config = get_config()
-            fallback_model = config.gemini_model_fallback
-            
-            logger.warning(f"[LLM] 切换到备选模型: {fallback_model}")
-            self._model = genai.GenerativeModel(
-                model_name=fallback_model,
-                system_instruction=self._system_prompt,
-            )
-            self._current_model_name = fallback_model
-            self._using_fallback = True
-            logger.info(f"[LLM] 备选模型 {fallback_model} 初始化成功")
-            return True
-        except Exception as e:
-            logger.error(f"[LLM] 切换备选模型失败: {e}")
-            return False
-    
+        """运行时切换到备选模型（委托 LLMClient.switch_to_fallback）"""
+        return self._client.switch_to_fallback()
+
     def is_available(self) -> bool:
-        """检查分析器是否可用"""
-        return self._model is not None or self._openai_client is not None
+        """检查分析器是否可用（委托 LLMClient.is_available）"""
+        return self._client.is_available()
     
     def _call_openai_api(self, prompt: str, generation_config: dict) -> str:
         """
