@@ -32,6 +32,12 @@ from src.cn_prompts import CNPromptBuilder, CN_ANALYST_SYSTEM_PROMPT
 
 # P0-5: 类型已迁至 src.llm.types。re-import 保持存量 import 路径可用。
 from src.llm.types import AnalysisResult, DeepAnalysisResult, OrchestratorCancelled  # noqa: F401
+from src.llm.prompts import (  # noqa: F401  re-export for backward compat
+    STOCK_NAME_MAP, get_stock_name_multi_source,
+    TECHNICAL_SYSTEM_PROMPT, FUNDAMENTAL_SYSTEM_PROMPT, NEWS_SYSTEM_PROMPT,
+    SYNTHESIZER_PROMPT, DEEP_AGENTS, DEEP_PROMPTS,
+    format_volume, format_amount, build_analysis_prompt,
+)
 logger = logging.getLogger(__name__)
 
 # ============================================================
