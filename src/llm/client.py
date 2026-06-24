@@ -1,12 +1,14 @@
-"""LLM 客户端初始化 + fallback 逻辑 — 迁自 src/analyzer.py:GeminiAnalyzer。
+"""LLM 客户端 — 封装 Gemini + OpenAI 双 provider 的初始化、状态管理、fallback。
 
-包含：
-- init_gemini_model：初始化 Gemini 模型（带 fallback）
-- init_openai_client：初始化 OpenAI 兼容 API 客户端
-- switch_to_fallback_model：运行时切换到 fallback 模型
-- is_available：检查客户端是否可用（any model + OpenAI）
+迁自 src/analyzer.py:GeminiAnalyzer 的 7 个状态字段 + 3 个 init 方法。
 
-设计目标：让这些函数独立可测，不依赖 GeminiAnalyzer 实例。
+设计目标:
+- LLMClient 拥有所有 provider 状态（model / openai_client / current_model_name 等）
+- 提供 ensure_initialized / switch_to_fallback / is_available 等 lifecycle API
+- 保留 init_gemini_model / init_openai_client / switch_to_fallback_model /
+  is_available 模块函数作为底层 helper（Phase 3 引入，pure functional）
+
+GeminiAnalyzer 持有 self._client = LLMClient(...) 并把状态访问转为委托。
 """
 from __future__ import annotations
 
@@ -147,3 +149,127 @@ def switch_to_fallback_model(
 def is_available(model: Any = None, openai_client: Any = None) -> bool:
     """检查 LLM 客户端是否可用（任一 provider 即可）。"""
     return model is not None or openai_client is not None
+
+
+# ============================================================
+# LLMClient: stateful wrapper combining Gemini + OpenAI
+# ============================================================
+
+
+class LLMClient:
+    """封装 LLM 双 provider 状态：Gemini + OpenAI 兼容 API。
+
+    GeminiAnalyzer 持有 self._client = LLMClient(...) 并把状态访问转为委托。
+
+    字段（迁自 GeminiAnalyzer）:
+        api_key: Gemini API Key
+        model: google.generativeai.GenerativeModel 实例（可 None）
+        current_model_name: 当前激活的模型名（Gemini 或 OpenAI）
+        using_fallback: 当前是否在用 Gemini 备选模型
+        use_openai: 是否在用 OpenAI 兼容 API
+        openai_client: openai.OpenAI 实例（可 None）
+        system_prompt: 系统提示词（可动态变更：例如中国市场切到 CN_ANALYST_SYSTEM_PROMPT）
+    """
+
+    def __init__(
+        self,
+        api_key: Optional[str],
+        gemini_model: str,
+        gemini_fallback_model: str,
+        openai_api_key: Optional[str],
+        openai_base_url: Optional[str],
+        openai_model: str,
+        system_prompt: str,
+    ):
+        self.api_key = api_key
+        self.gemini_model_name_cfg = gemini_model
+        self.gemini_fallback_cfg = gemini_fallback_model
+        self.openai_api_key = openai_api_key
+        self.openai_base_url = openai_base_url
+        self.openai_model_cfg = openai_model
+
+        self.system_prompt = system_prompt
+
+        # runtime state
+        self.model = None
+        self.current_model_name: Optional[str] = None
+        self.using_fallback = False
+        self.use_openai = False
+        self.openai_client = None
+
+        self._init_providers()
+
+    def _init_providers(self) -> None:
+        """初始化 Gemini → 若 Gemini 失败再尝试 OpenAI（与旧 __init__ 行为一致）。"""
+        gemini_key_valid = (
+            self.api_key
+            and not self.api_key.startswith("your_")
+            and len(self.api_key) > 10
+        )
+
+        if gemini_key_valid:
+            try:
+                model, name, fallback = init_gemini_model(
+                    self.api_key,
+                    self.gemini_model_name_cfg,
+                    self.gemini_fallback_cfg,
+                    self.system_prompt,
+                )
+                if model is not None:
+                    self.model = model
+                    self.current_model_name = name
+                    self.using_fallback = fallback
+                else:
+                    logger.warning("Gemini 初始化失败，尝试 OpenAI 兼容 API")
+                    self.init_openai()
+            except Exception as e:
+                logger.warning(f"Gemini 初始化异常: {e}，尝试 OpenAI 兼容 API")
+                self.init_openai()
+        else:
+            logger.info("Gemini API Key 未配置，尝试使用 OpenAI 兼容 API")
+            self.init_openai()
+
+        if not self.model and not self.openai_client:
+            logger.warning("未配置任何 AI API Key，AI 分析功能将不可用")
+
+    def init_openai(self) -> None:
+        """初始化 OpenAI 兼容 API（mutate self）。"""
+        client, model_name, use_openai = init_openai_client(
+            self.openai_api_key,
+            self.openai_base_url,
+            self.openai_model_cfg,
+        )
+        if client is not None:
+            self.openai_client = client
+            self.current_model_name = model_name
+            self.use_openai = use_openai
+
+    def switch_to_fallback(self) -> bool:
+        """运行时切换 Gemini 备选模型（mutate self）。
+
+        Returns:
+            是否切换成功
+        """
+        model, name, _ = switch_to_fallback_model(
+            self.api_key,
+            self.gemini_fallback_cfg,
+            self.system_prompt,
+        )
+        if model is None:
+            return False
+        self.model = model
+        self.current_model_name = name
+        self.using_fallback = True
+        return True
+
+    def is_available(self) -> bool:
+        """任一 provider 可用即返回 True。"""
+        return is_available(self.model, self.openai_client)
+
+    def set_system_prompt(self, prompt: str) -> None:
+        """运行时变更系统提示词（例如切换 CN 模式时使用）。
+
+        注意：变更后已实例化的 model 不会自动重建——下次切换 fallback 时新提示词生效。
+        与旧 GeminiAnalyzer.analyze() 行为一致。
+        """
+        self.system_prompt = prompt
