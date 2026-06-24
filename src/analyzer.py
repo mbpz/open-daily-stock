@@ -42,6 +42,9 @@ from src.llm.client import (  # noqa: F401  re-export for backward compat
     init_gemini_model, init_openai_client, switch_to_fallback_model,
     is_available as llm_is_available,
 )
+from src.llm.parsing import (  # noqa: F401  re-export for backward compat
+    fix_json_string, parse_response, parse_text_response, parse_specialist_json,
+)
 logger = logging.getLogger(__name__)
 
 # ============================================================
