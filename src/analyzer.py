@@ -38,6 +38,10 @@ from src.llm.prompts import (  # noqa: F401  re-export for backward compat
     SYNTHESIZER_PROMPT, DEEP_AGENTS, DEEP_PROMPTS,
     format_volume, format_amount, build_analysis_prompt,
 )
+from src.llm.client import (  # noqa: F401  re-export for backward compat
+    init_gemini_model, init_openai_client, switch_to_fallback_model,
+    is_available as llm_is_available,
+)
 logger = logging.getLogger(__name__)
 
 # ============================================================
