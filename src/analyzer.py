@@ -257,8 +257,11 @@ class GeminiAnalyzer:
         config = get_config()
         api_key = api_key or config.gemini_api_key
 
-        self._system_prompt = self.SYSTEM_PROMPT  # mutable: CN 模式会覆盖
         self._cn_mode = False  # Whether to use A-share specific CN prompts
+
+        # Create the LLM client. system_prompt initial value comes from class attr.
+        # Subsequent mutations to self._system_prompt route through the
+        # property setter below, keeping client.system_prompt in sync.
 
         # All provider state is owned by LLMClient
         self._client = LLMClient(
@@ -268,7 +271,7 @@ class GeminiAnalyzer:
             openai_api_key=config.openai_api_key,
             openai_base_url=config.openai_base_url,
             openai_model=config.openai_model,
-            system_prompt=self._system_prompt,
+            system_prompt=self.SYSTEM_PROMPT,
         )
 
     # ============================================================
@@ -321,6 +324,14 @@ class GeminiAnalyzer:
     def _use_openai(self, value: bool) -> None:
         self._client.use_openai = value
 
+    @property
+    def _system_prompt(self) -> str:
+        return self._client.system_prompt
+
+    @_system_prompt.setter
+    def _system_prompt(self, value: str) -> None:
+        self._client.system_prompt = value
+
     def _init_openai_fallback(self) -> None:
         """初始化 OpenAI 兼容 API（委托 LLMClient.init_openai）"""
         self._client.init_openai()
@@ -339,175 +350,18 @@ class GeminiAnalyzer:
         return self._client.is_available()
     
     def _call_openai_api(self, prompt: str, generation_config: dict) -> str:
-        """
-        调用 OpenAI 兼容 API
-        
-        Args:
-            prompt: 提示词
-            generation_config: 生成配置
-            
-        Returns:
-            响应文本
-        """
-        config = get_config()
-        max_retries = config.gemini_max_retries
-        base_delay = config.gemini_retry_delay
-        
-        for attempt in range(max_retries):
-            try:
-                if attempt > 0:
-                    delay = base_delay * (2 ** (attempt - 1))
-                    delay = min(delay, 60)
-                    logger.info(f"[OpenAI] 第 {attempt + 1} 次重试，等待 {delay:.1f} 秒...")
-                    time.sleep(delay)
-                
-                config = get_config()
-                response = self._openai_client.chat.completions.create(
-                    model=self._current_model_name,
-                    messages=[
-                        {"role": "system", "content": self._system_prompt},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=generation_config.get('temperature', config.openai_temperature),
-                    max_tokens=generation_config.get('max_output_tokens', 8192),
-                )
-                
-                if response and response.choices and response.choices[0].message.content:
-                    return response.choices[0].message.content
-                else:
-                    raise ValueError("OpenAI API 返回空响应")
-                    
-            except Exception as e:
-                error_str = str(e)
-                is_rate_limit = '429' in error_str or 'rate' in error_str.lower() or 'quota' in error_str.lower()
-                
-                if is_rate_limit:
-                    logger.warning(f"[OpenAI] API 限流，第 {attempt + 1}/{max_retries} 次尝试: {error_str[:100]}")
-                else:
-                    logger.warning(f"[OpenAI] API 调用失败，第 {attempt + 1}/{max_retries} 次尝试: {error_str[:100]}")
-                
-                if attempt == max_retries - 1:
-                    raise
-        
-        raise Exception("OpenAI API 调用失败，已达最大重试次数")
-    
+        """调用 OpenAI 兼容 API（委托 LLMClient.call_openai）"""
+        return self._client.call_openai(prompt, generation_config)
+
     def _call_api_with_retry(
         self,
         prompt: str,
         generation_config: dict,
         cancellation_event: Optional["threading.Event"] = None,
     ) -> str:
-        """
-        调用 AI API，带有重试和模型切换机制
-        
-        优先级：Gemini > Gemini 备选模型 > OpenAI 兼容 API
-        
-        处理 429 限流错误：
-        1. 先指数退避重试
-        2. 多次失败后切换到备选模型
-        3. Gemini 完全失败后尝试 OpenAI
-        
-        Args:
-            prompt: 提示词
-            generation_config: 生成配置
-            cancellation_event: 可选信号；如被 set()，立即抛 OrchestratorCancelled
-            
-        Returns:
-            响应文本
-        """
-        # 如果已经在使用 OpenAI 模式，直接调用 OpenAI
-        if self._use_openai:
-            return self._call_openai_api(prompt, generation_config)
-        
-        config = get_config()
-        max_retries = config.gemini_max_retries
-        base_delay = config.gemini_retry_delay
+        """调用 AI API（委托 LLMClient.call_with_retry，含 Gemini 重试+OpenAI fallback+取消支持）"""
+        return self._client.call_with_retry(prompt, generation_config, cancellation_event)
 
-        last_error = None
-        tried_fallback = getattr(self, '_using_fallback', False)
-
-        # Co-operative cancellation: callers can pass an Event that the
-        # caller sets to abort the retry loop (e.g. user closed the GUI).
-        # We check before each attempt and after each sleep.
-        def _check_cancel() -> None:
-            if cancellation_event is not None and cancellation_event.is_set():
-                raise OrchestratorCancelled("cancelled before Gemini attempt")
-
-        for attempt in range(max_retries):
-            _check_cancel()
-            try:
-                # 请求前增加延时（防止请求过快触发限流）
-                if attempt > 0:
-                    delay = base_delay * (2 ** (attempt - 1))  # 指数退避: 5, 10, 20, 40...
-                    delay = min(delay, 60)  # 最大60秒
-                    logger.info(f"[Gemini] 第 {attempt + 1} 次重试，等待 {delay:.1f} 秒...")
-                    # Sleep in 0.5s slices so cancellation is responsive
-                    # (default backoff can be 5–60s).
-                    slept = 0.0
-                    while slept < delay:
-                        _check_cancel()
-                        step = min(0.5, delay - slept)
-                        time.sleep(step)
-                        slept += step
-                
-                response = self._model.generate_content(
-                    prompt,
-                    generation_config=generation_config,
-                    request_options={"timeout": 120}
-                )
-                
-                if response and response.text:
-                    return response.text
-                else:
-                    raise ValueError("Gemini 返回空响应")
-                    
-            except Exception as e:
-                # Cancellation must propagate immediately, not be
-                # treated as a retryable error.
-                if isinstance(e, OrchestratorCancelled):
-                    raise
-                last_error = e
-                error_str = str(e)
-                
-                # 检查是否是 429 限流错误
-                is_rate_limit = '429' in error_str or 'quota' in error_str.lower() or 'rate' in error_str.lower()
-                
-                if is_rate_limit:
-                    logger.warning(f"[Gemini] API 限流 (429)，第 {attempt + 1}/{max_retries} 次尝试: {error_str[:100]}")
-                    
-                    # 如果已经重试了一半次数且还没切换过备选模型，尝试切换
-                    if attempt >= max_retries // 2 and not tried_fallback:
-                        if self._switch_to_fallback_model():
-                            tried_fallback = True
-                            logger.info("[Gemini] 已切换到备选模型，继续重试")
-                        else:
-                            logger.warning("[Gemini] 切换备选模型失败，继续使用当前模型重试")
-                else:
-                    # 非限流错误，记录并继续重试
-                    logger.warning(f"[Gemini] API 调用失败，第 {attempt + 1}/{max_retries} 次尝试: {error_str[:100]}")
-        
-        # Gemini 所有重试都失败，尝试 OpenAI 兼容 API
-        if self._openai_client:
-            logger.warning("[Gemini] 所有重试失败，切换到 OpenAI 兼容 API")
-            try:
-                return self._call_openai_api(prompt, generation_config)
-            except Exception as openai_error:
-                logger.error(f"[OpenAI] 备选 API 也失败: {openai_error}")
-                raise last_error or openai_error
-        elif config.openai_api_key and config.openai_base_url:
-            # 尝试懒加载初始化 OpenAI
-            logger.warning("[Gemini] 所有重试失败，尝试初始化 OpenAI 兼容 API")
-            self._init_openai_fallback()
-            if self._openai_client:
-                try:
-                    return self._call_openai_api(prompt, generation_config)
-                except Exception as openai_error:
-                    logger.error(f"[OpenAI] 备选 API 也失败: {openai_error}")
-                    raise last_error or openai_error
-        
-        # 所有方式都失败
-        raise last_error or Exception("所有 AI API 调用失败，已达最大重试次数")
-    
     def analyze(
         self,
         context: Dict[str, Any],

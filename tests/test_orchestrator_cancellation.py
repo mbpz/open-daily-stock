@@ -91,25 +91,25 @@ def test_cancelled_result_shape_for_gui():
     assert r.analysis_summary
 
 
-class _FakeAnalyzer:
-    """Minimal stand-in for GeminiAnalyzer exposing the real _call_api_with_retry.
+class _FakeClient:
+    """Minimal stand-in for LLMClient exposing the real call_with_retry.
 
-    We bind the real unbound method to this instance so cancellation
-    behaviour runs against the production code, but stub out the model
-    and config so we can drive the retry path deterministically.
+    The cancellation behavior under test lives on LLMClient.call_with_retry
+    (P0-5 Phase 7). We construct a bare object and bind the unbound method
+    so production code drives the test, with provider state stubbed.
     """
 
     def __init__(self):
-        self._use_openai = False
-        self._openai_client = None
-        self._using_fallback = False
-        self._switch_to_fallback_model = lambda: False
+        self.use_openai = False
+        self.openai_client = None
+        self.using_fallback = False
+        self.switch_to_fallback = lambda: False
         # Always raises -> forces the retry path
-        self._model = MagicMock()
-        self._model.generate_content.side_effect = Exception("429 rate limited")
+        self.model = MagicMock()
+        self.model.generate_content.side_effect = Exception("429 rate limited")
         # Bind the real method
-        from src.analyzer import GeminiAnalyzer
-        self._call_api_with_retry = GeminiAnalyzer._call_api_with_retry.__get__(self)
+        from src.llm.client import LLMClient
+        self.call_with_retry = LLMClient.call_with_retry.__get__(self)
 
 
 def test_cancellation_check_inside_analyzer_sleep_is_responsive():
@@ -124,11 +124,11 @@ def test_cancellation_check_inside_analyzer_sleep_is_responsive():
         if calls["n"] == 1:
             raise OrchestratorCancelled("cancelled during sleep")
 
-    a = _FakeAnalyzer()
+    a = _FakeClient()
 
-    with patch("src.analyzer.get_config") as gc, \
-         patch("src.analyzer.time.sleep", side_effect=fake_sleep), \
-         patch("src.analyzer.logger"):
+    with patch("src.llm.client.get_config") as gc, \
+         patch("src.llm.client.time.sleep", side_effect=fake_sleep), \
+         patch("src.llm.client.logger"):
         cfg = MagicMock()
         cfg.gemini_max_retries = 5
         cfg.gemini_retry_delay = 5.0
@@ -138,21 +138,21 @@ def test_cancellation_check_inside_analyzer_sleep_is_responsive():
 
         ev = threading.Event()
         with pytest.raises(OrchestratorCancelled):
-            a._call_api_with_retry("p", {}, cancellation_event=ev)
+            a.call_with_retry("p", {}, cancellation_event=ev)
 
     assert calls["n"] == 1, f"expected exactly 1 sleep, got {calls['n']}"
 
 
 def test_cancellation_with_no_event_means_no_check_runs():
     """Backwards compat: passing cancellation_event=None must not raise."""
-    a = _FakeAnalyzer()
+    a = _FakeClient()
     # Make the model succeed first try
-    a._model.generate_content.side_effect = None
-    a._model.generate_content.return_value.text = "ok response"
+    a.model.generate_content.side_effect = None
+    a.model.generate_content.return_value.text = "ok response"
 
-    with patch("src.analyzer.get_config") as gc, \
-         patch("src.analyzer.time.sleep"), \
-         patch("src.analyzer.logger"):
+    with patch("src.llm.client.get_config") as gc, \
+         patch("src.llm.client.time.sleep"), \
+         patch("src.llm.client.logger"):
         cfg = MagicMock()
         cfg.gemini_max_retries = 2
         cfg.gemini_retry_delay = 1.0
@@ -160,5 +160,5 @@ def test_cancellation_with_no_event_means_no_check_runs():
         cfg.openai_base_url = None
         gc.return_value = cfg
 
-        out = a._call_api_with_retry("p", {}, cancellation_event=None)
+        out = a.call_with_retry("p", {}, cancellation_event=None)
         assert out == "ok response"
