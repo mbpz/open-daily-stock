@@ -455,3 +455,137 @@ class LLMClient:
 
         # 所有方式都失败
         raise last_error or Exception("所有 AI API 调用失败，已达最大重试次数")
+
+
+# ============================================================
+
+
+# ============================================================
+# Streaming methods — migrated from GeminiAnalyzer in Phase 8
+# ============================================================
+
+
+    def call_gemini_stream(
+        self, prompt: str, generation_config: dict,
+    ):
+        """Call Gemini API with streaming enabled.
+
+        Yields text chunks as they arrive from the API.
+
+        迁自 src/analyzer.py:GeminiAnalyzer._call_gemini_stream。
+        """
+        if self.use_openai and self.openai_client:
+            yield from self.call_openai_stream(prompt, generation_config)
+            return
+
+        config = get_config()
+        max_retries = config.gemini_max_retries
+        base_delay = config.gemini_retry_delay
+
+        last_error = None
+        tried_fallback = self.using_fallback
+
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    delay = base_delay * (2 ** (attempt - 1))
+                    delay = min(delay, 60)
+                    logger.info(f"[Gemini Stream] 第 {attempt + 1} 次重试，等待 {delay:.1f} 秒...")
+                    time.sleep(delay)
+
+                response = self.model.generate_content(
+                    prompt,
+                    generation_config=generation_config,
+                    stream=True,
+                    request_options={"timeout": 120},
+                )
+
+                for chunk in response:
+                    if chunk.text:
+                        yield chunk.text
+
+                return
+
+            except Exception as e:
+                last_error = e
+                error_str = str(e)
+                is_rate_limit = (
+                    '429' in error_str
+                    or 'quota' in error_str.lower()
+                    or 'rate' in error_str.lower()
+                )
+                if is_rate_limit:
+                    logger.warning(f"[Gemini Stream] API 限流 (429)，第 {attempt + 1}/{max_retries} 次尝试")
+                    if attempt >= max_retries // 2 and not tried_fallback:
+                        if self.switch_to_fallback():
+                            tried_fallback = True
+                            logger.info("[Gemini Stream] 已切换到备选模型，继续重试")
+                else:
+                    logger.warning(f"[Gemini Stream] API 调用失败，第 {attempt + 1}/{max_retries} 次尝试: {error_str[:100]}")
+
+        if self.openai_client:
+            logger.warning("[Gemini Stream] 所有重试失败，尝试 OpenAI 兼容 API 流式")
+            try:
+                yield from self.call_openai_stream(prompt, generation_config)
+                return
+            except Exception as openai_error:
+                logger.error(f"[OpenAI Stream] 备选也失败: {openai_error}")
+                raise last_error or openai_error
+
+        raise last_error or Exception("所有 AI API 流式调用失败")
+
+
+    def call_openai_stream(
+        self, prompt: str, generation_config: dict,
+    ):
+        """Call OpenAI-compatible API with streaming enabled.
+
+        Yields text chunks as they arrive from the API.
+
+        迁自 src/analyzer.py:GeminiAnalyzer._call_openai_stream。
+        """
+        config = get_config()
+        max_retries = config.gemini_max_retries
+        base_delay = config.gemini_retry_delay
+
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    delay = base_delay * (2 ** (attempt - 1))
+                    delay = min(delay, 60)
+                    logger.info(f"[OpenAI Stream] 第 {attempt + 1} 次重试，等待 {delay:.1f} 秒...")
+                    time.sleep(delay)
+
+                stream = self.openai_client.chat.completions.create(
+                    model=self.current_model_name,
+                    messages=[
+                        {"role": "system", "content": self.system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=generation_config.get("temperature", config.openai_temperature),
+                    max_tokens=generation_config.get("max_output_tokens", 8192),
+                    stream=True,
+                )
+
+                for chunk in stream:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        yield chunk.choices[0].delta.content
+
+                return
+
+            except Exception as e:
+                error_str = str(e)
+                is_rate_limit = (
+                    '429' in error_str
+                    or 'rate' in error_str.lower()
+                    or 'quota' in error_str.lower()
+                )
+                if is_rate_limit:
+                    logger.warning(f"[OpenAI Stream] API 限流，第 {attempt + 1}/{max_retries} 次尝试")
+                else:
+                    logger.warning(f"[OpenAI Stream] API 调用失败，第 {attempt + 1}/{max_retries} 次尝试: {error_str[:100]}")
+
+                if attempt == max_retries - 1:
+                    raise
+
+        raise Exception("OpenAI 流式 API 调用失败，已达最大重试次数")

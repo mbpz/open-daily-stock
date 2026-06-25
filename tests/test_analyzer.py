@@ -313,7 +313,7 @@ class TestGeminiAnalyzerStreaming:
                     '}',
                 ]
 
-                with patch.object(analyzer, '_call_gemini_stream', return_value=iter(mock_chunks)):
+                with patch.object(type(analyzer._client), 'call_gemini_stream', return_value=iter(mock_chunks)):
                     # Mock _model to make is_available() return True
                     analyzer._model = MagicMock()
 
@@ -372,7 +372,7 @@ class TestGeminiAnalyzerStreaming:
                 analyzer = GeminiAnalyzer(api_key="fake_key")
 
                 # Mock _call_gemini_stream to raise an error
-                with patch.object(analyzer, '_call_gemini_stream', side_effect=Exception("API rate limit")):
+                with patch.object(type(analyzer._client), 'call_gemini_stream', side_effect=Exception("API rate limit")):
                     analyzer._model = MagicMock()
 
                     context = {"code": "600519"}
@@ -417,9 +417,9 @@ class TestGeminiAnalyzerStreaming:
                     '}',
                 ]
 
-                # We need to mock _call_gemini_stream since when _use_openai=True,
-                # it delegates to _call_openai_stream
-                with patch.object(analyzer, '_call_openai_stream', return_value=iter(mock_chunks)):
+                # We need to mock call_openai_stream since when use_openai=True,
+                # it delegates to call_openai_stream
+                with patch.object(type(analyzer._client), 'call_openai_stream', return_value=iter(mock_chunks)):
                     context = {
                         "code": "AAPL",
                         "stock_name": "苹果",
