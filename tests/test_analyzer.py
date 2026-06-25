@@ -12,7 +12,7 @@ class TestGeminiAnalyzer:
     def test_analyzer_no_key(self):
         """无 API Key 时返回可用但失败的分析结果"""
         # 创建一个没有有效 API Key 的 analyzer
-        with patch('src.analyzer.get_config') as mock_config:
+        with patch('src.llm.analyzer.get_config') as mock_config:
             config = MagicMock()
             config.gemini_api_key = None
             config.openai_api_key = None
@@ -35,7 +35,7 @@ class TestGeminiAnalyzer:
     def test_analyzer_mock_response(self):
         """Mock LLM 响应解析"""
         # 创建一个有 API Key 但会被 mock 的 analyzer
-        with patch('src.analyzer.get_config') as mock_config:
+        with patch('src.llm.analyzer.get_config') as mock_config:
             config = MagicMock()
             config.gemini_api_key = "fake_key_for_testing"
             config.openai_api_key = None
@@ -107,7 +107,7 @@ class TestGeminiAnalyzer:
     def test_analyzer_parse_text_response(self):
         """测试纯文本响应解析"""
         # 创建一个 analyzer 实例
-        with patch('src.analyzer.get_config') as mock_config:
+        with patch('src.llm.analyzer.get_config') as mock_config:
             config = MagicMock()
             config.gemini_api_key = None
             config.openai_api_key = None
@@ -135,7 +135,7 @@ class TestGeminiAnalyzer:
 
     def test_analyzer_format_volume(self):
         """测试成交量格式化"""
-        with patch('src.analyzer.get_config') as mock_config:
+        with patch('src.llm.analyzer.get_config') as mock_config:
             config = MagicMock()
             config.gemini_api_key = None
             config.openai_api_key = None
@@ -162,7 +162,7 @@ class TestGeminiAnalyzer:
 
     def test_analyzer_format_amount(self):
         """测试成交额格式化"""
-        with patch('src.analyzer.get_config') as mock_config:
+        with patch('src.llm.analyzer.get_config') as mock_config:
             config = MagicMock()
             config.gemini_api_key = None
             config.openai_api_key = None
@@ -254,7 +254,7 @@ class TestGeminiAnalyzerStreaming:
 
     def test_analyze_stream_yields_done_when_no_api_key(self):
         """analyze_stream yields a done event with error when no API key"""
-        with patch('src.analyzer.get_config') as mock_config:
+        with patch('src.llm.analyzer.get_config') as mock_config:
             config = MagicMock()
             config.gemini_api_key = None
             config.openai_api_key = None
@@ -282,7 +282,7 @@ class TestGeminiAnalyzerStreaming:
 
     def test_analyze_stream_yields_chunks_and_done(self):
         """analyze_stream yields chunks then a done event with parsed result"""
-        with patch('src.analyzer.get_config') as mock_config:
+        with patch('src.llm.analyzer.get_config') as mock_config:
             config = MagicMock()
             config.gemini_api_key = "fake_key_for_testing"
             config.openai_api_key = None
@@ -353,7 +353,7 @@ class TestGeminiAnalyzerStreaming:
 
     def test_analyze_stream_handles_api_error(self):
         """analyze_stream yields a done error when the API call fails"""
-        with patch('src.analyzer.get_config') as mock_config:
+        with patch('src.llm.analyzer.get_config') as mock_config:
             config = MagicMock()
             config.gemini_api_key = "fake_key_for_testing"
             config.openai_api_key = None
@@ -387,7 +387,7 @@ class TestGeminiAnalyzerStreaming:
 
     def test_analyze_stream_uses_openai_fallback(self):
         """analyze_stream should route to _call_openai_stream when _use_openai is True"""
-        with patch('src.analyzer.get_config') as mock_config:
+        with patch('src.llm.analyzer.get_config') as mock_config:
             config = MagicMock()
             config.gemini_api_key = "fake_key"
             config.openai_api_key = "fake_openai_key_for_test"
