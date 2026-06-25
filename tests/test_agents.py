@@ -617,7 +617,7 @@ class TestDeepAnalyzeIntegration:
 
     def test_deep_analyze_no_api_key(self):
         """deep_analyze returns error when no API key configured."""
-        with patch('src.analyzer.get_config') as mock_config:
+        with patch('src.llm.analyzer.get_config') as mock_config:
             config = MagicMock()
             config.gemini_api_key = None
             config.openai_api_key = None
@@ -643,7 +643,7 @@ class TestDeepAnalyzeIntegration:
     def test_deep_analyze_no_enabled_agents(self):
         """deep_analyze returns error when no agents enabled."""
         from src.analyzer import GeminiAnalyzer
-        with patch('src.analyzer.get_config') as mock_config:
+        with patch('src.llm.analyzer.get_config') as mock_config:
             config = MagicMock()
             config.gemini_api_key = "fake_key"
             config.openai_api_key = None
